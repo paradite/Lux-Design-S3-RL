@@ -5,7 +5,8 @@ import flax.core
 import optax
 from typing import Sequence, Dict, Any, List
 from luxai_s3.state import EnvObs, UnitState, MapTile
-from flax import struct
+from flax import struct, serialization
+from flax.core import freeze, FrozenDict
 
 class PolicyState:
     """State of the policy network."""
@@ -65,7 +66,7 @@ def create_dummy_obs(max_units=16):
     """Create a dummy observation for initialization."""
     # Create dummy arrays with proper shapes and types
     dummy_position = jnp.zeros((max_units, 2), dtype=jnp.int16)
-    dummy_energy = jnp.zeros((max_units, 1), dtype=jnp.int16)
+    dummy_energy = jnp.zeros((max_units,), dtype=jnp.int16)  # Shape should match UnitState
     dummy_units_mask = jnp.zeros((max_units,), dtype=jnp.bool_)
     dummy_map_energy = jnp.zeros((24, 24), dtype=jnp.int16)
     dummy_map_tile_type = jnp.zeros((24, 24), dtype=jnp.int16)
@@ -75,49 +76,33 @@ def create_dummy_obs(max_units=16):
     dummy_relic_nodes = jnp.zeros((6, 2), dtype=jnp.int16)
     dummy_relic_nodes_mask = jnp.zeros((6,), dtype=jnp.bool_)
     
-    # Create empty instances first
-    empty_unit_state = UnitState(position=jnp.zeros((1, 2)), energy=jnp.zeros((1, 1)))
-    empty_map_tile = MapTile(energy=jnp.zeros((1, 1)), tile_type=jnp.zeros((1, 1)))
-    empty_obs = EnvObs(
-        units=empty_unit_state,
-        units_mask=jnp.zeros((1,)),
-        map_features=empty_map_tile,
-        sensor_mask=jnp.zeros((1, 1)),
-        team_points=jnp.zeros((2,)),
-        team_wins=jnp.zeros((2,)),
-        steps=0,
-        match_steps=0,
-        relic_nodes=jnp.zeros((1, 2)),
-        relic_nodes_mask=jnp.zeros((1,))
-    )
+    # Create nested structures using frozen dictionaries
+    unit_state_dict = freeze({
+        'position': dummy_position,
+        'energy': dummy_energy
+    })
     
-    # Create nested structures using struct.replace
-    unit_state = struct.replace(
-        empty_unit_state,
-        position=dummy_position,
-        energy=dummy_energy
-    )
+    map_tile_dict = freeze({
+        'energy': dummy_map_energy,
+        'tile_type': dummy_map_tile_type
+    })
     
-    map_tile = struct.replace(
-        empty_map_tile,
-        energy=dummy_map_energy,
-        tile_type=dummy_map_tile_type
-    )
+    # Create full observation dictionary
+    obs_dict = freeze({
+        'units': unit_state_dict,
+        'units_mask': dummy_units_mask,
+        'map_features': map_tile_dict,
+        'sensor_mask': dummy_sensor_mask,
+        'team_points': dummy_team_points,
+        'team_wins': dummy_team_wins,
+        'steps': 0,
+        'match_steps': 0,
+        'relic_nodes': dummy_relic_nodes,
+        'relic_nodes_mask': dummy_relic_nodes_mask
+    })
     
-    # Create full observation using struct.replace
-    return struct.replace(
-        empty_obs,
-        units=unit_state,
-        units_mask=dummy_units_mask,
-        map_features=map_tile,
-        sensor_mask=dummy_sensor_mask,
-        team_points=dummy_team_points,
-        team_wins=dummy_team_wins,
-        steps=0,
-        match_steps=0,
-        relic_nodes=dummy_relic_nodes,
-        relic_nodes_mask=dummy_relic_nodes_mask
-    )
+    # Convert frozen dict to EnvObs
+    return flax.serialization.from_state_dict(EnvObs(), obs_dict)
 
 def create_policy(rng, hidden_dims=(64, 64), max_units=16, learning_rate=1e-3):
     """Create and initialize the policy network and optimizer."""
