@@ -12,7 +12,7 @@ from luxai_s3.params import EnvParams
 from policy import create_policy, sample_action, update_step
 import logging
 
-def train_basic_env(num_episodes: int = 10) -> None:
+def train_basic_env(num_episodes: int = 20) -> None:
     """Train a policy gradient agent for the Lux AI Season 3 environment."""
     # Initialize logging
     logging.basicConfig(
@@ -170,10 +170,21 @@ def train_basic_env(num_episodes: int = 10) -> None:
             obs_dict = env.get_obs(state, params)
             obs = convert_obs_to_dict(obs_dict)
             
-            # Update reward based on team points and unit counts for current player
+            # Update reward based on team points, unit counts, and exploration for current player
             current_team_points = float(obs[current_player]["team_points"][current_team_idx])
             current_unit_count = float(np.sum(obs[current_player]["units_mask"]))
-            current_reward = current_team_points + 0.1 * current_unit_count
+            
+            # Calculate exploration bonus based on unit positions
+            unit_positions = np.array(obs[current_player]["units"]["position"][current_team_idx])
+            valid_mask = np.array(obs[current_player]["units_mask"][current_team_idx])
+            valid_positions = unit_positions[valid_mask]
+            # Convert positions to tuples for set operation
+            position_tuples = [tuple(pos) for pos in valid_positions]
+            unique_positions = len(set(position_tuples))
+            exploration_bonus = 0.05 * unique_positions  # Small bonus for exploring unique positions
+            
+            # Balance between points, units, and exploration
+            current_reward = current_team_points + 0.1 * current_unit_count + exploration_bonus
             episode_reward += current_reward
             
             # Log reward components for debugging
