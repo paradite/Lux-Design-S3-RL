@@ -49,8 +49,8 @@ class PolicyNetwork(nn.Module):
         # Process each unit independently
         x = jnp.concatenate([
             team_pos,  # Shape: (max_units, 2)
-            jnp.expand_dims(team_energy, axis=1),  # Shape: (max_units, 1)
-            jnp.expand_dims(team_mask, axis=1).astype(jnp.float32)  # Shape: (max_units, 1)
+            team_energy[..., None],  # Shape: (max_units, 1)
+            team_mask[..., None].astype(jnp.float32)  # Shape: (max_units, 1)
         ], axis=-1)  # Final shape: (max_units, 4)
         
         # Simple feedforward network
@@ -73,9 +73,9 @@ class PolicyNetwork(nn.Module):
 def create_dummy_obs(max_units=16):
     """Create a dummy observation for initialization."""
     # Create dummy arrays with proper shapes and types
-    dummy_position = jnp.zeros((max_units, 2), dtype=jnp.int16)
-    dummy_energy = jnp.zeros((max_units,), dtype=jnp.int16)  # Shape should match UnitState
-    dummy_units_mask = jnp.zeros((max_units,), dtype=jnp.bool_)
+    dummy_position = jnp.zeros((2, max_units, 2), dtype=jnp.int16)  # (teams, units, coords)
+    dummy_energy = jnp.zeros((2, max_units), dtype=jnp.int16)  # (teams, units)
+    dummy_units_mask = jnp.zeros((2, max_units), dtype=jnp.bool_)  # (teams, units)
     dummy_map_energy = jnp.zeros((24, 24), dtype=jnp.int16)
     dummy_map_tile_type = jnp.zeros((24, 24), dtype=jnp.int16)
     dummy_sensor_mask = jnp.zeros((24, 24), dtype=jnp.bool_)
