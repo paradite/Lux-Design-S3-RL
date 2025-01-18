@@ -69,12 +69,13 @@ class PolicyNetwork(nn.Module):
         # Create team index feature (already binary 0/1)
         team_idx_feature = jnp.ones_like(mask_feature, dtype=jnp.float32) * team_idx.astype(jnp.float32)  # Shape: (batch_size, max_units, 1)
         
-        # Log shapes and dtypes of input features
-        logging.info(f"Feature shapes and dtypes:")
-        logging.info(f"  pos_feature: shape={pos_feature.shape}, dtype={pos_feature.dtype}")
-        logging.info(f"  energy_feature: shape={energy_feature.shape}, dtype={energy_feature.dtype}")
-        logging.info(f"  mask_feature: shape={mask_feature.shape}, dtype={mask_feature.dtype}")
-        logging.info(f"  team_idx_feature: shape={team_idx_feature.shape}, dtype={team_idx_feature.dtype}")
+        # Only log feature info in debug mode
+        if logging.getLogger().getEffectiveLevel() <= logging.DEBUG:
+            logging.debug(f"Feature shapes and dtypes:")
+            logging.debug(f"  pos_feature: shape={pos_feature.shape}, dtype={pos_feature.dtype}")
+            logging.debug(f"  energy_feature: shape={energy_feature.shape}, dtype={energy_feature.dtype}")
+            logging.debug(f"  mask_feature: shape={mask_feature.shape}, dtype={mask_feature.dtype}")
+            logging.debug(f"  team_idx_feature: shape={team_idx_feature.shape}, dtype={team_idx_feature.dtype}")
         
         x = jnp.concatenate([
             pos_feature,  # Shape: (batch_size, max_units, 2)
@@ -83,32 +84,36 @@ class PolicyNetwork(nn.Module):
             team_idx_feature  # Shape: (batch_size, max_units, 1)
         ], axis=-1)  # Final shape: (batch_size, max_units, 5)
         
-        # Log concatenated feature shape
-        logging.info(f"Concatenated feature tensor x: shape={x.shape}, dtype={x.dtype}")
-        
-        # Log value distributions
-        logging.info(f"Feature value ranges:")
-        logging.info(f"  pos_feature: min={jnp.min(pos_feature)}, max={jnp.max(pos_feature)}")
-        logging.info(f"  energy_feature: min={jnp.min(energy_feature)}, max={jnp.max(energy_feature)}")
-        logging.info(f"  mask_feature: min={jnp.min(mask_feature)}, max={jnp.max(mask_feature)}")
-        logging.info(f"  team_idx_feature: min={jnp.min(team_idx_feature)}, max={jnp.max(team_idx_feature)}")
+        # Only log in debug mode
+        if logging.getLogger().getEffectiveLevel() <= logging.DEBUG:
+            logging.debug(f"Concatenated feature tensor x: shape={x.shape}, dtype={x.dtype}")
+            logging.debug(f"Feature value ranges:")
+            logging.debug(f"  pos_feature: min={jnp.min(pos_feature)}, max={jnp.max(pos_feature)}")
+            logging.debug(f"  energy_feature: min={jnp.min(energy_feature)}, max={jnp.max(energy_feature)}")
+            logging.debug(f"  mask_feature: min={jnp.min(mask_feature)}, max={jnp.max(mask_feature)}")
+            logging.debug(f"  team_idx_feature: min={jnp.min(team_idx_feature)}, max={jnp.max(team_idx_feature)}")
         
         # Process each unit's features through the network
         batch_size = x.shape[0]
         max_units = x.shape[1]
         
         # Reshape for dense layers while preserving batch structure
-        # Features are already normalized:
-        # - pos_feature: [0,1] range (normalized by map size)
-        # - energy_feature: [0,1] range (normalized by max energy)
-        # - mask_feature: {0,1} binary
-        # - team_idx_feature: {0,1} binary for player position
         x = x.reshape(-1, x.shape[-1])  # Shape: (batch_size * max_units, 5)
         
-        # Simple feedforward network
-        for hidden_dim in self.hidden_dims:
+        # Deeper network with residual connections and layer normalization
+        for i, hidden_dim in enumerate(self.hidden_dims):
+            # Store input for residual connection
+            if i > 0:
+                residual = x
+            
+            # Dense layer with layer normalization and ReLU
             x = nn.Dense(hidden_dim)(x)
+            x = nn.LayerNorm()(x)
             x = nn.relu(x)
+            
+            # Add residual connection after first layer
+            if i > 0:
+                x = x + residual
         
         # Output layer for action logits
         action_logits = nn.Dense(self.num_actions)(x)  # Shape: (batch_size * max_units, num_actions)

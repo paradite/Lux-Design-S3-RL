@@ -24,6 +24,10 @@ def train_basic_env(num_episodes: int = 20) -> None:
         ]
     )
     
+    # Set debug level for policy network
+    policy_logger = logging.getLogger("policy")
+    policy_logger.setLevel(logging.INFO)
+    
     # Initialize environment and policy
     env: LuxAIS3Env = LuxAIS3Env()
     params: EnvParams = env.default_params
@@ -189,7 +193,7 @@ def train_basic_env(num_episodes: int = 20) -> None:
             episode_reward += current_reward
             
             # Log reward components less frequently
-            if step_count % 50 == 0:
+            if step_count % 100 == 0:
                 logging.info(f"Step {step_count} - Team points: {current_team_points:.2f}")
                 logging.info(f"Step {step_count} - Unit count contribution: {0.1 * current_unit_count:.2f}")
                 logging.info(f"Step {step_count} - Total reward: {current_reward:.2f}")
@@ -219,18 +223,19 @@ def train_basic_env(num_episodes: int = 20) -> None:
             action_array = jnp.array(all_actions)  # Shape: [batch_size, max_units]
             reward_array = jnp.array(all_rewards)  # Shape: [batch_size]
             
-            # Log shapes for debugging
-            logging.info(f"Batch shapes before update:")
-            logging.info(f"Action array shape: {action_array.shape}")
-            logging.info(f"Reward array shape: {reward_array.shape}")
-            for player in ["player_0", "player_1"]:
-                logging.info(f"{player} observation shapes:")
-                for key, value in obs_batch[player].items():
-                    if isinstance(value, dict):
-                        for subkey, subvalue in value.items():
-                            logging.info(f"  {key}.{subkey}: {subvalue.shape}")
-                    else:
-                        logging.info(f"  {key}: {value.shape}")
+            # Log shapes for debugging only in debug mode
+            if logging.getLogger().getEffectiveLevel() <= logging.DEBUG:
+                logging.debug(f"Batch shapes before update:")
+                logging.debug(f"Action array shape: {action_array.shape}")
+                logging.debug(f"Reward array shape: {reward_array.shape}")
+                for player in ["player_0", "player_1"]:
+                    logging.debug(f"{player} observation shapes:")
+                    for key, value in obs_batch[player].items():
+                        if isinstance(value, dict):
+                            for subkey, subvalue in value.items():
+                                logging.debug(f"  {key}.{subkey}: {subvalue.shape}")
+                        else:
+                            logging.debug(f"  {key}: {value.shape}")
             
             # Normalize rewards
             reward_array = (reward_array - reward_array.mean()) / (reward_array.std() + 1e-8)
