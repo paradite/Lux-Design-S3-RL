@@ -94,7 +94,8 @@ def train_basic_env(num_episodes: int = 100) -> None:
             
             # Get observation for player_0 and sample actions
             # obs is Dict[str, EnvObs], so we can directly index it
-            p0_actions = sample_action(policy, policy_state.params, obs, key_p0)
+            p0_obs = {"player_0": obs["player_0"]}  # Create single-player observation dict
+            p0_actions = sample_action(policy, policy_state.params, p0_obs, key_p0)
             
             # Convert to full action format (movement + sap direction)
             p0_full_actions = jnp.zeros((params.max_units, 3), dtype=jnp.int32)

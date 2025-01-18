@@ -32,17 +32,25 @@ class PolicyNetwork(nn.Module):
         
         # Extract relevant features from player's observation
         # Get position and energy from UnitState
-        units_pos = player_obs.units.position  # Shape: (max_units, 2)
-        units_energy = player_obs.units.energy  # Shape: (max_units,)
+        units_pos = player_obs.units.position  # Shape: (2, max_units, 2)
+        units_energy = player_obs.units.energy  # Shape: (2, max_units)
         
         # Get unit mask
-        units_mask = player_obs.units_mask  # Shape: (max_units,)
+        units_mask = player_obs.units_mask  # Shape: (2, max_units)
+        
+        # Get current team's features using JAX array indexing
+        team_idx = 0 if player_key == "player_0" else 1
+        
+        # Use take() for array indexing
+        team_pos = jnp.take(units_pos, team_idx, axis=0)  # Shape: (max_units, 2)
+        team_energy = jnp.take(units_energy, team_idx, axis=0)  # Shape: (max_units,)
+        team_mask = jnp.take(units_mask, team_idx, axis=0)  # Shape: (max_units,)
         
         # Process each unit independently
         x = jnp.concatenate([
-            units_pos,  # Shape: (max_units, 2)
-            jnp.expand_dims(units_energy, axis=1),  # Shape: (max_units, 1)
-            jnp.expand_dims(units_mask, axis=1).astype(jnp.float32)  # Shape: (max_units, 1)
+            team_pos,  # Shape: (max_units, 2)
+            jnp.expand_dims(team_energy, axis=1),  # Shape: (max_units, 1)
+            jnp.expand_dims(team_mask, axis=1).astype(jnp.float32)  # Shape: (max_units, 1)
         ], axis=-1)  # Final shape: (max_units, 4)
         
         # Simple feedforward network
