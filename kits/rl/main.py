@@ -145,17 +145,20 @@ class TrainedAgent:
         noise = jax.random.gumbel(action_key, logits.shape)
         movement_actions = np.array(jnp.argmax(logits + noise, axis=-1))
         
+        # Take actions for current team only
+        team_actions = movement_actions[self.team_id]
+        
         # Log action distribution and unit status
-        action_counts = np.bincount(movement_actions[unit_mask], minlength=5)
+        action_counts = np.bincount(team_actions[unit_mask], minlength=5)
         active_units = np.sum(unit_mask)
         logging.debug(f"Step {step} - Action distribution: {action_counts}")
         logging.debug(f"Step {step} - Active units: {active_units}")
         
         # Set movement actions for valid units using numpy indexing
-        actions[:, 0] = movement_actions
+        actions[self.team_id, :, 0] = movement_actions
         
-        # Ensure actions are properly formatted
-        return np.array(actions, dtype=np.int32)
+        # Return only current team's actions
+        return np.array(actions[self.team_id], dtype=np.int32)
 
 # Global dictionary to store agent instances
 agent_dict = {}

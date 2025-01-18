@@ -20,37 +20,34 @@ class PolicyNetwork(nn.Module):
     num_actions: int = 5  # 0-4 for movement
     
     @nn.compact
-    def __call__(self, obs: Dict[str, EnvObs], player_key: str = "player_0"):
+    def __call__(self, obs: EnvObs, team_idx: int = 0):
         """Process observation into action logits.
         
         Args:
-            obs: Dict[str, EnvObs] containing observations for each player
-            player_key: Key for the current player's observation
+            obs: EnvObs containing the current observation
+            team_idx: Index for the current team (0 or 1)
         """
         # Get current player's observation
-        player_obs = obs[player_key]
+        player_obs = obs
         
-        # Extract relevant features from player's observation
-        # Get position and energy from UnitState
+        # Extract relevant features from observation
+        # Get position and energy from UnitState dataclass
         units_pos = player_obs.units.position  # Shape: (2, max_units, 2)
         units_energy = player_obs.units.energy  # Shape: (2, max_units)
         
-        # Get unit mask
+        # Get unit mask directly from EnvObs dataclass
         units_mask = player_obs.units_mask  # Shape: (2, max_units)
         
-        # Get current team's features using JAX array indexing
-        team_idx = 0 if player_key == "player_0" else 1
-        
-        # Use take() for array indexing
-        team_pos = jnp.take(units_pos, team_idx, axis=0)  # Shape: (max_units, 2)
+        # Get current team's features using team index
+        team_pos = jnp.take(units_pos, team_idx, axis=0)    # Shape: (max_units, 2)
         team_energy = jnp.take(units_energy, team_idx, axis=0)  # Shape: (max_units,)
         team_mask = jnp.take(units_mask, team_idx, axis=0)  # Shape: (max_units,)
         
         # Process each unit independently
         x = jnp.concatenate([
             team_pos,  # Shape: (max_units, 2)
-            team_energy[..., None],  # Shape: (max_units, 1)
-            team_mask[..., None].astype(jnp.float32)  # Shape: (max_units, 1)
+            jnp.expand_dims(team_energy, axis=-1),  # Shape: (max_units, 1)
+            jnp.expand_dims(team_mask.astype(jnp.float32), axis=-1)  # Shape: (max_units, 1)
         ], axis=-1)  # Final shape: (max_units, 4)
         
         # Simple feedforward network
@@ -77,54 +74,43 @@ class PolicyNetwork(nn.Module):
 def create_dummy_obs(max_units=16):
     """Create a dummy observation for initialization."""
     # Create dummy arrays with proper shapes and types
-    dummy_position = jnp.zeros((2, max_units, 2), dtype=jnp.int16)  # (teams, units, coords)
-    dummy_energy = jnp.zeros((2, max_units), dtype=jnp.int16)  # (teams, units)
-    dummy_units_mask = jnp.zeros((2, max_units), dtype=jnp.bool_)  # (teams, units)
-    dummy_map_energy = jnp.zeros((24, 24), dtype=jnp.int16)
-    dummy_map_tile_type = jnp.zeros((24, 24), dtype=jnp.int16)
-    dummy_sensor_mask = jnp.zeros((24, 24), dtype=jnp.bool_)
-    dummy_team_points = jnp.zeros((2,), dtype=jnp.int32)
-    dummy_team_wins = jnp.zeros((2,), dtype=jnp.int32)
-    dummy_relic_nodes = jnp.zeros((6, 2), dtype=jnp.int16)
-    dummy_relic_nodes_mask = jnp.zeros((6,), dtype=jnp.bool_)
+    # Create dummy arrays with proper shapes and types
+    position = jnp.zeros((2, max_units, 2), dtype=jnp.int16)  # (teams, units, coords)
+    energy = jnp.zeros((2, max_units), dtype=jnp.int16)  # (teams, units)
     
     # Create nested structures using struct.field
     @struct.dataclass
     class DummyUnitState:
-        position: chex.Array = struct.field(default_factory=lambda: dummy_position)
-        energy: chex.Array = struct.field(default_factory=lambda: dummy_energy)
+        position: chex.Array = struct.field(default_factory=lambda: position)
+        energy: chex.Array = struct.field(default_factory=lambda: energy)
     
     @struct.dataclass
     class DummyMapTile:
-        energy: chex.Array = struct.field(default_factory=lambda: dummy_map_energy)
-        tile_type: chex.Array = struct.field(default_factory=lambda: dummy_map_tile_type)
+        energy: chex.Array = struct.field(default_factory=lambda: jnp.zeros((24, 24), dtype=jnp.int16))
+        tile_type: chex.Array = struct.field(default_factory=lambda: jnp.zeros((24, 24), dtype=jnp.int16))
     
     @struct.dataclass
     class DummyEnvObs:
-        units: UnitState = struct.field(default_factory=lambda: DummyUnitState())
-        units_mask: chex.Array = struct.field(default_factory=lambda: dummy_units_mask)
-        map_features: MapTile = struct.field(default_factory=lambda: DummyMapTile())
-        sensor_mask: chex.Array = struct.field(default_factory=lambda: dummy_sensor_mask)
-        team_points: chex.Array = struct.field(default_factory=lambda: dummy_team_points)
-        team_wins: chex.Array = struct.field(default_factory=lambda: dummy_team_wins)
+        units: UnitState = struct.field(default_factory=DummyUnitState)
+        units_mask: chex.Array = struct.field(default_factory=lambda: jnp.zeros((2, max_units), dtype=jnp.bool_))
+        map_features: MapTile = struct.field(default_factory=DummyMapTile)
+        sensor_mask: chex.Array = struct.field(default_factory=lambda: jnp.zeros((2, 24, 24), dtype=jnp.bool_))
+        team_points: chex.Array = struct.field(default_factory=lambda: jnp.zeros((2,), dtype=jnp.int32))
+        team_wins: chex.Array = struct.field(default_factory=lambda: jnp.zeros((2,), dtype=jnp.int32))
         steps: int = struct.field(default=0)
         match_steps: int = struct.field(default=0)
-        relic_nodes: chex.Array = struct.field(default_factory=lambda: dummy_relic_nodes)
-        relic_nodes_mask: chex.Array = struct.field(default_factory=lambda: dummy_relic_nodes_mask)
+        relic_nodes: chex.Array = struct.field(default_factory=lambda: jnp.zeros((6, 2), dtype=jnp.int16))
+        relic_nodes_mask: chex.Array = struct.field(default_factory=lambda: jnp.zeros((6,), dtype=jnp.bool_))
     
-    # Create dummy observations for both players
-    dummy_obs = DummyEnvObs()
-    return {
-        "player_0": dummy_obs,
-        "player_1": dummy_obs
-    }
+    # Create single EnvObs instance
+    return DummyEnvObs()
 
 def create_policy(rng, hidden_dims=(64, 64), max_units=16, learning_rate=1e-3):
     """Create and initialize the policy network and optimizer."""
     policy = PolicyNetwork(hidden_dims=hidden_dims)
     # Initialize with dummy observation
     dummy_obs = create_dummy_obs(max_units)
-    params = policy.init(rng, dummy_obs)
+    params = policy.init(rng, dummy_obs, team_idx=0)
     
     # Initialize optimizer
     optimizer = optax.adam(learning_rate)
@@ -135,33 +121,33 @@ def create_policy(rng, hidden_dims=(64, 64), max_units=16, learning_rate=1e-3):
     
     return policy, policy_state, optimizer
 
-def sample_action(policy, params, obs: Dict[str, EnvObs], rng, player_key: str = "player_0"):
+def sample_action(policy, params, obs: EnvObs, rng, team_idx: int = 0):
     """Sample actions from the policy for all units.
     
     Args:
         policy: PolicyNetwork instance
         params: Policy parameters
-        obs: Dict[str, EnvObs] containing observations for each player
+        obs: EnvObs containing the current observation
         rng: JAX random key
-        player_key: Key for the current player's observation
+        team_idx: Index for the current team (0 or 1)
     
     Returns:
         Array of actions for each unit
     """
-    logits = policy.apply(params, obs, player_key)
+    logits = policy.apply(params, obs, team_idx)
     # Add small noise for exploration
     noise = jax.random.gumbel(rng, logits.shape)
     actions = jnp.argmax(logits + noise, axis=-1)
-    # Mask actions for invalid units
-    return jnp.where(obs[player_key].units_mask, actions, 0)
+    # Mask actions for invalid units using team-specific mask
+    return jnp.where(obs.units_mask[team_idx], actions, 0)
 
-def compute_loss(policy, params, obs_batch: List[Dict[str, EnvObs]], action_batch, reward_batch):
+def compute_loss(policy, params, obs_batch: List[EnvObs], action_batch, reward_batch):
     """Compute policy gradient loss.
     
     Args:
         policy: PolicyNetwork instance
         params: Policy parameters
-        obs_batch: List of Dict[str, EnvObs] objects
+        obs_batch: List of EnvObs objects
         action_batch: Array of actions taken (shape: [batch_size, max_units])
         reward_batch: Array of rewards (shape: [batch_size])
     
@@ -171,8 +157,8 @@ def compute_loss(policy, params, obs_batch: List[Dict[str, EnvObs]], action_batc
     # Stack observations into a single batch
     batch_obs = jax.tree_map(lambda *x: jnp.stack(x), *obs_batch)
     
-    # Get action logits for player_0
-    logits = policy.apply(params, batch_obs, "player_0")  # [batch_size, max_units, num_actions]
+    # Get action logits for team 0
+    logits = policy.apply(params, batch_obs, team_idx=0)  # [batch_size, max_units, num_actions]
     
     # Compute log probabilities
     action_probs = jax.nn.softmax(logits)
@@ -182,8 +168,8 @@ def compute_loss(policy, params, obs_batch: List[Dict[str, EnvObs]], action_batc
         axis=-1
     )[..., 0]  # Remove gathered dimension
     
-    # Mask out invalid units using player_0's mask
-    valid_mask = batch_obs["player_0"].units_mask
+    # Mask out invalid units using team 0's mask
+    valid_mask = batch_obs.units_mask[0]  # Get team 0's mask
     log_probs = jnp.where(
         valid_mask,
         jnp.log(selected_probs + 1e-8),
