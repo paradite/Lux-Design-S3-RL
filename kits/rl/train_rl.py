@@ -120,7 +120,7 @@ def train_basic_env(num_episodes: int = 100) -> None:
             # Step environment - returns (obs, state, rewards, done, info)
             raw_obs, state, rewards, done_flags, info = env.step(step_key, state, actions, params)
             
-            # Get observation from step result
+            # Use raw observation directly since it's already an EnvObs
             obs = raw_obs
             
             # Get reward and update episode reward
@@ -128,7 +128,7 @@ def train_basic_env(num_episodes: int = 100) -> None:
             episode_reward = episode_reward + jnp.array(current_reward)
             
             # Check termination status using done flags
-            done = jnp.any(done_flags["player_0"])
+            done = jnp.any(done_flags[0])
         
         # Convert episode reward to float and store
         final_reward = float(episode_reward)
@@ -149,8 +149,8 @@ def train_basic_env(num_episodes: int = 100) -> None:
         # Update policy if we have enough experience
         if len(all_observations) >= buffer_size:
             # Convert to arrays and normalize rewards
-            # Convert observations to array
-            obs_array = jnp.array(all_observations)
+            # Stack observations using tree_map for nested structures
+            obs_array = jax.tree_map(lambda *x: jnp.stack(x), *all_observations)
             action_array = jnp.array(all_actions)
             reward_array = jnp.array(all_rewards)
             reward_array = (reward_array - reward_array.mean()) / (reward_array.std() + 1e-8)

@@ -159,24 +159,21 @@ def sample_action(policy, params, obs: EnvObs, rng, team_idx: int = 0):
     # Mask actions for invalid units using team-specific mask
     return jnp.where(obs.units_mask[team_idx], actions, 0)
 
-def compute_loss(policy, params, obs_batch: List[EnvObs], action_batch, reward_batch):
+def compute_loss(policy, params, obs_batch: EnvObs, action_batch, reward_batch):
     """Compute policy gradient loss.
     
     Args:
         policy: PolicyNetwork instance
         params: Policy parameters
-        obs_batch: List of EnvObs objects
+        obs_batch: Batched EnvObs containing observations
         action_batch: Array of actions taken (shape: [batch_size, max_units])
         reward_batch: Array of rewards (shape: [batch_size])
     
     Returns:
         Scalar loss value
     """
-    # Stack observations into a single batch
-    batch_obs = jax.tree_map(lambda *x: jnp.stack(x), *obs_batch)
-    
     # Get action logits for team 0
-    logits = policy.apply(params, batch_obs, team_idx=0)  # [batch_size, max_units, num_actions]
+    logits = policy.apply(params, obs_batch, team_idx=0)  # [batch_size, max_units, num_actions]
     
     # Compute log probabilities
     action_probs = jax.nn.softmax(logits)
@@ -187,7 +184,7 @@ def compute_loss(policy, params, obs_batch: List[EnvObs], action_batch, reward_b
     )[..., 0]  # Remove gathered dimension
     
     # Mask out invalid units using team 0's mask
-    valid_mask = batch_obs.units_mask[0]  # Get team 0's mask
+    valid_mask = obs_batch.units_mask[0]  # Get team 0's mask
     log_probs = jnp.where(
         valid_mask,
         jnp.log(selected_probs + 1e-8),
