@@ -20,27 +20,27 @@ class PolicyNetwork(nn.Module):
     num_actions: int = 5  # 0-4 for movement
     
     @nn.compact
-    def __call__(self, obs: EnvObs):
+    def __call__(self, obs: Dict[str, EnvObs], player_key: str = "player_0"):
         """Process observation into action logits.
         
         Args:
-            obs: EnvObs containing:
-                - units: UnitState with position and energy
-                - units_mask: Mask of valid units
-                - map_features: MapTile with energy and tile_type
-                - sensor_mask: Visibility mask
+            obs: Dict[str, EnvObs] containing observations for each player
+            player_key: Key for the current player's observation
         """
-        # Extract relevant features from EnvObs
-        units_pos = obs.units.position  # Shape: (max_units, 2)
-        units_energy = obs.units.energy  # Shape: (max_units,)
-        units_mask = obs.units_mask  # Shape: (max_units,)
+        # Get current player's observation
+        player_obs = obs[player_key]
+        
+        # Extract relevant features from player's observation
+        units_pos = player_obs.units.position  # Shape: (max_units, 2)
+        units_energy = player_obs.units.energy  # Shape: (max_units,)
+        units_mask = player_obs.units_mask  # Shape: (max_units,)
         
         # Combine unit features
         unit_features = jnp.concatenate([
-            units_pos,
-            jnp.expand_dims(units_energy, axis=1),  # Add channel dimension
-            jnp.expand_dims(units_mask, axis=1).astype(jnp.float32)
-        ], axis=-1)  # Shape: (max_units, 4)
+            units_pos,  # Shape: (max_units, 2)
+            jnp.expand_dims(units_energy, axis=1),  # Shape: (max_units, 1)
+            jnp.expand_dims(units_mask, axis=1).astype(jnp.float32)  # Shape: (max_units, 1)
+        ], axis=-1)  # Final shape: (max_units, 4)
         
         # Process each unit independently
         x = unit_features
@@ -118,32 +118,33 @@ def create_policy(rng, hidden_dims=(64, 64), max_units=16, learning_rate=1e-3):
     
     return policy, policy_state, optimizer
 
-def sample_action(policy, params, obs: EnvObs, rng):
+def sample_action(policy, params, obs: Dict[str, EnvObs], rng, player_key: str = "player_0"):
     """Sample actions from the policy for all units.
     
     Args:
         policy: PolicyNetwork instance
         params: Policy parameters
-        obs: EnvObs containing unit and map information
+        obs: Dict[str, EnvObs] containing observations for each player
         rng: JAX random key
+        player_key: Key for the current player's observation
     
     Returns:
         Array of actions for each unit
     """
-    logits = policy.apply(params, obs)
+    logits = policy.apply(params, obs, player_key)
     # Add small noise for exploration
     noise = jax.random.gumbel(rng, logits.shape)
     actions = jnp.argmax(logits + noise, axis=-1)
     # Mask actions for invalid units
-    return jnp.where(obs.units_mask, actions, 0)
+    return jnp.where(obs[player_key].units_mask, actions, 0)
 
-def compute_loss(policy, params, obs_batch: List[EnvObs], action_batch, reward_batch):
+def compute_loss(policy, params, obs_batch: List[Dict[str, EnvObs]], action_batch, reward_batch):
     """Compute policy gradient loss.
     
     Args:
         policy: PolicyNetwork instance
         params: Policy parameters
-        obs_batch: List of EnvObs objects
+        obs_batch: List of Dict[str, EnvObs] objects
         action_batch: Array of actions taken (shape: [batch_size, max_units])
         reward_batch: Array of rewards (shape: [batch_size])
     
@@ -153,8 +154,8 @@ def compute_loss(policy, params, obs_batch: List[EnvObs], action_batch, reward_b
     # Stack observations into a single batch
     batch_obs = jax.tree_map(lambda *x: jnp.stack(x), *obs_batch)
     
-    # Get action logits
-    logits = policy.apply(params, batch_obs)  # [batch_size, max_units, num_actions]
+    # Get action logits for player_0
+    logits = policy.apply(params, batch_obs, "player_0")  # [batch_size, max_units, num_actions]
     
     # Compute log probabilities
     action_probs = jax.nn.softmax(logits)
@@ -164,8 +165,8 @@ def compute_loss(policy, params, obs_batch: List[EnvObs], action_batch, reward_b
         axis=-1
     )[..., 0]  # Remove gathered dimension
     
-    # Mask out invalid units
-    valid_mask = batch_obs.units_mask
+    # Mask out invalid units using player_0's mask
+    valid_mask = batch_obs["player_0"].units_mask
     log_probs = jnp.where(
         valid_mask,
         jnp.log(selected_probs + 1e-8),

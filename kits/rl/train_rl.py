@@ -4,6 +4,7 @@ import numpy as np
 import optax
 import chex
 from typing import Dict, Any, Tuple, List
+from luxai_s3.state import EnvObs
 from luxai_s3.env import LuxAIS3Env
 from luxai_s3.params import EnvParams
 from luxai_s3.state import EnvState, EnvObs
@@ -67,13 +68,13 @@ def train_basic_env(num_episodes: int = 100) -> None:
     episode_losses: List[float] = []
     
     # Initialize experience buffers for the episode
-    episode_observations: List[EnvObs] = []
+    episode_observations: List[Dict[str, EnvObs]] = []
     episode_actions: List[chex.Array] = []
     episode_rewards: List[float] = []
     
     # Buffer for collecting experience across episodes
     buffer_size = 1000
-    all_observations: List[EnvObs] = []
+    all_observations: List[Dict[str, EnvObs]] = []
     all_actions: List[chex.Array] = []
     all_rewards: List[float] = []
     
@@ -93,8 +94,7 @@ def train_basic_env(num_episodes: int = 100) -> None:
             
             # Get observation for player_0 and sample actions
             # obs is Dict[str, EnvObs], so we can directly index it
-            p0_obs = obs["player_0"]  # Safe since env always includes player_0
-            p0_actions = sample_action(policy, policy_state.params, p0_obs, key_p0)
+            p0_actions = sample_action(policy, policy_state.params, obs, key_p0)
             
             # Convert to full action format (movement + sap direction)
             p0_full_actions = jnp.zeros((params.max_units, 3), dtype=jnp.int32)
@@ -107,7 +107,7 @@ def train_basic_env(num_episodes: int = 100) -> None:
             }
             
             # Store experience
-            episode_observations.append(p0_obs)
+            episode_observations.append(obs)  # Store full observation dictionary
             episode_actions.append(p0_actions)
             
             # Step environment
@@ -127,8 +127,7 @@ def train_basic_env(num_episodes: int = 100) -> None:
             episode_reward = episode_reward + current_reward
             
             # Check termination status
-            p0_status = done_dict["player_0"]
-            done = p0_status["terminated"] or p0_status["truncated"]
+            done = done_dict["player_0"]["terminated"] or done_dict["player_0"]["truncated"]
             
             # Reward handling is done above
             
