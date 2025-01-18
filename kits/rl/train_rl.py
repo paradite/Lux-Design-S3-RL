@@ -6,6 +6,7 @@ import chex
 import os
 import flax
 import time
+import wandb
 from typing import Dict, Any, Tuple, List, Union
 from luxai_s3.state import EnvObs, EnvState
 from luxai_s3.env import LuxAIS3Env
@@ -23,6 +24,23 @@ def train_basic_env(num_episodes: int = int(os.environ.get("TRAIN_EPISODES", "10
         seed: Random seed for training. Can be set via TRAIN_SEED environment variable.
               Defaults to current timestamp if not set.
     """
+    # Initialize wandb
+    wandb_api_key = os.environ.get("WANDB_API_KEY")
+    if not wandb_api_key:
+        logging.warning("WANDB_API_KEY not found in environment variables. Wandb logging disabled.")
+        use_wandb = False
+    else:
+        wandb.login(key=wandb_api_key)
+        wandb.init(
+            project="lux-s3-rl",
+            config={
+                "num_episodes": num_episodes,
+                "seed": seed,
+                "buffer_size": 1000,
+            }
+        )
+        use_wandb = True
+    
     # Initialize logging
     logging.basicConfig(
         level=logging.INFO,
@@ -228,6 +246,19 @@ def train_basic_env(num_episodes: int = int(os.environ.get("TRAIN_EPISODES", "10
             logging.info(f"Latest episode reward: {episode_reward:.2f}")
             if episode_losses:
                 logging.info(f"Latest loss: {episode_losses[-1]:.4f}")
+            
+            # Log metrics to wandb
+            if use_wandb:
+                wandb.log({
+                    "episode": episode + 1,
+                    "mean_reward_last_10": mean_reward,
+                    "episode_reward": episode_reward,
+                    "loss": episode_losses[-1] if episode_losses else None,
+                    "exploration_weight": exploration_weight,
+                    "unique_positions": unique_positions,
+                    "current_unit_count": current_unit_count,
+                    "current_team_points": current_team_points
+                })
     
     # Save trained policy parameters
     # Convert policy parameters to flat numpy arrays
@@ -249,6 +280,15 @@ def train_basic_env(num_episodes: int = int(os.environ.get("TRAIN_EPISODES", "10
     np.savez(save_path, **save_dict)
     logging.info(f"Training complete. Mean reward: {np.mean(total_rewards):.2f}")
     logging.info("Saved model parameters to kits/rl/model_params.npz")
+    
+    if use_wandb:
+        # Log final metrics and model file
+        wandb.log({
+            "final_mean_reward": np.mean(total_rewards),
+            "total_episodes": num_episodes
+        })
+        wandb.save("kits/rl/model_params.npz")
+        wandb.finish()
 
 def convert_obs_to_dict(raw_obs: Union[EnvObs, Dict[str, EnvObs]]) -> Dict[str, Dict[str, Any]]:
     """Convert raw observation to policy network format.
