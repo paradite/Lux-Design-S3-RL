@@ -100,20 +100,10 @@ class PolicyNetwork(nn.Module):
         # Reshape for dense layers while preserving batch structure
         x = x.reshape(-1, x.shape[-1])  # Shape: (batch_size * max_units, 5)
         
-        # Deeper network with residual connections and layer normalization
-        for i, hidden_dim in enumerate(self.hidden_dims):
-            # Store input for residual connection
-            if i > 0:
-                residual = x
-            
-            # Dense layer with layer normalization and ReLU
+        # Simple feedforward network
+        for hidden_dim in self.hidden_dims:
             x = nn.Dense(hidden_dim)(x)
-            x = nn.LayerNorm()(x)
             x = nn.relu(x)
-            
-            # Add residual connection after first layer
-            if i > 0:
-                x = x + residual
         
         # Output layer for action logits
         action_logits = nn.Dense(self.num_actions)(x)  # Shape: (batch_size * max_units, num_actions)
@@ -157,7 +147,7 @@ def create_dummy_obs(max_units=16):
     return dummy_obs
 
 def create_policy(rng, hidden_dims=(128, 128, 64), max_units=16, learning_rate=1e-3):
-    """Create and initialize the policy network and optimizer with deeper architecture."""
+    """Create and initialize the policy network and optimizer."""
     policy = PolicyNetwork(hidden_dims=hidden_dims)
     
     # Initialize with dummy observation dictionary in raw format
