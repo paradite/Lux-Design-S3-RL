@@ -12,7 +12,7 @@ from luxai_s3.params import EnvParams
 from policy import create_policy, sample_action, update_step
 import logging
 
-def train_basic_env(num_episodes: int = 20) -> None:
+def train_basic_env(num_episodes: int = 100) -> None:
     """Train a policy gradient agent for the Lux AI Season 3 environment."""
     # Initialize logging
     logging.basicConfig(
@@ -51,13 +51,6 @@ def train_basic_env(num_episodes: int = 20) -> None:
     all_actions: List[jnp.ndarray] = []
     all_rewards: List[float] = []
     
-    # Log training parameters
-    logging.info("Starting training with parameters:")
-    logging.info(f"Max steps per match: {params.max_steps_in_match}")
-    logging.info(f"Max units: {params.max_units}")
-    logging.info(f"Map size: {params.map_width}x{params.map_height}")
-    logging.info(f"Number of teams: {params.num_teams}")
-    
     # Training loop
     for episode in range(num_episodes):
         # Reset environment
@@ -75,23 +68,6 @@ def train_basic_env(num_episodes: int = 20) -> None:
         opponent_player = "player_1" if current_player == "player_0" else "player_0"
         current_team_idx = 0 if current_player == "player_0" else 1
         opponent_team_idx = 1 - current_team_idx
-        
-        logging.info(f"Episode {episode} - Training as {current_player}")
-        
-        # Log observation structure for debugging only at the start of training
-        if episode == 0:
-            logging.info(f"Initial observation structure:")
-            for player in [current_player, opponent_player]:
-                player_obs = obs[player]
-                logging.info(f"{player} observation shapes:")
-                logging.info(f"  Units position: {player_obs['units']['position'].shape}")
-                logging.info(f"  Units energy: {player_obs['units']['energy'].shape}")
-                logging.info(f"  Units mask: {player_obs['units_mask'].shape}")
-                logging.info(f"  Map features energy: {player_obs['map_features']['energy'].shape}")
-                logging.info(f"  Map features tile type: {player_obs['map_features']['tile_type'].shape}")
-                logging.info(f"  Sensor mask: {player_obs['sensor_mask'].shape}")
-                logging.info(f"  Relic nodes: {player_obs['relic_nodes'].shape}")
-                logging.info(f"  Relic nodes mask: {player_obs['relic_nodes_mask'].shape}")
         
         episode_reward = 0.0
         done = False
@@ -186,19 +162,13 @@ def train_basic_env(num_episodes: int = 20) -> None:
             # Convert positions to tuples for set operation
             position_tuples = [tuple(pos) for pos in valid_positions]
             unique_positions = len(set(position_tuples))
-            exploration_bonus = 0.05 * unique_positions  # Small bonus for exploring unique positions
+            # Decay exploration weight over time
+            exploration_weight = max(0.05 * (1.0 - episode / num_episodes), 0.01)  # Minimum weight of 0.01
+            exploration_bonus = exploration_weight * unique_positions  # Decaying bonus for exploring unique positions
             
             # Balance between points, units, and exploration
             current_reward = current_team_points + 0.1 * current_unit_count + exploration_bonus
             episode_reward += current_reward
-            
-            # Log reward components less frequently
-            if step_count % 100 == 0:
-                logging.info(f"Step {step_count} - Team points: {current_team_points:.2f}")
-                logging.info(f"Step {step_count} - Unit count contribution: {0.1 * current_unit_count:.2f}")
-                logging.info(f"Step {step_count} - Total reward: {current_reward:.2f}")
-                logging.info(f"Step {step_count} - Active units: {np.sum(obs[current_player]['units_mask'])}")
-                logging.info(f"Step {step_count} - Training as: {current_player}")
             
             # Check termination
             done = jnp.any(done_flags[current_player])
@@ -223,29 +193,8 @@ def train_basic_env(num_episodes: int = 20) -> None:
             action_array = jnp.array(all_actions)  # Shape: [batch_size, max_units]
             reward_array = jnp.array(all_rewards)  # Shape: [batch_size]
             
-            # Log shapes for debugging only in debug mode
-            if logging.getLogger().getEffectiveLevel() <= logging.DEBUG:
-                logging.debug(f"Batch shapes before update:")
-                logging.debug(f"Action array shape: {action_array.shape}")
-                logging.debug(f"Reward array shape: {reward_array.shape}")
-                for player in ["player_0", "player_1"]:
-                    logging.debug(f"{player} observation shapes:")
-                    for key, value in obs_batch[player].items():
-                        if isinstance(value, dict):
-                            for subkey, subvalue in value.items():
-                                logging.debug(f"  {key}.{subkey}: {subvalue.shape}")
-                        else:
-                            logging.debug(f"  {key}: {value.shape}")
-            
             # Normalize rewards
             reward_array = (reward_array - reward_array.mean()) / (reward_array.std() + 1e-8)
-            
-            # Log pre-update state
-            logging.info("Pre-update policy state:")
-            params_dict = flax.traverse_util.flatten_dict(policy_state.params)
-            for key, value in params_dict.items():
-                if any(layer in '.'.join(key) for layer in ['Dense_0', 'Dense_1', 'Dense_2']):
-                    logging.info(f"{'.'.join(key)} mean: {jnp.mean(value)}")
             
             # Update policy
             policy_state, loss = update_step(
@@ -254,15 +203,7 @@ def train_basic_env(num_episodes: int = 20) -> None:
                 optimizer
             )
             
-            # Log post-update state
-            logging.info("Post-update policy state:")
-            params_dict = flax.traverse_util.flatten_dict(policy_state.params)
-            for key, value in params_dict.items():
-                if any(layer in '.'.join(key) for layer in ['Dense_0', 'Dense_1', 'Dense_2']):
-                    logging.info(f"{'.'.join(key)} mean: {jnp.mean(value)}")
-            
             logging.info(f"Update loss: {float(loss)}")
-            logging.info(f"Reward stats - mean: {float(jnp.mean(reward_array))}, std: {float(jnp.std(reward_array))}")
             episode_losses.append(float(loss))
             
             # Clear buffers
@@ -273,16 +214,11 @@ def train_basic_env(num_episodes: int = 20) -> None:
         # Log progress
         if (episode + 1) % 10 == 0:
             mean_reward = np.mean(total_rewards[-10:])
-            logging.info("-" * 40)
             logging.info(f"Episode {episode + 1}/{num_episodes}")
             logging.info(f"Mean reward (last 10): {mean_reward:.2f}")
             logging.info(f"Latest episode reward: {episode_reward:.2f}")
             if episode_losses:
                 logging.info(f"Latest loss: {episode_losses[-1]:.4f}")
-                logging.info(f"Total policy updates: {len(episode_losses)}")
-            logging.info(f"Total steps: {step_count}")
-            logging.info(f"Buffer size: {len(all_observations)}/{buffer_size}")
-            logging.info("-" * 40)
     
     # Save trained policy parameters
     # Convert policy parameters to flat numpy arrays
@@ -302,9 +238,9 @@ def train_basic_env(num_episodes: int = 20) -> None:
         'num_actions': np.array(5)
     }
     np.savez(save_path, **save_dict)
-    logging.info(f"Saved model parameters to {save_path}")
     logging.info(f"Training complete. Mean reward: {np.mean(total_rewards):.2f}")
     logging.info("Saved model parameters to kits/rl/model_params.npz")
+
 def convert_obs_to_dict(raw_obs: Union[EnvObs, Dict[str, EnvObs]]) -> Dict[str, Dict[str, Any]]:
     """Convert raw observation to policy network format.
     
