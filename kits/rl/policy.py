@@ -27,7 +27,7 @@ class PolicyNetwork(nn.Module):
             obs: EnvObs containing the current observation
             team_idx: Index for the current team (0 or 1)
         """
-        # Get current player's observation
+        # Use observation directly since it's already an EnvObs
         player_obs = obs
         
         # Extract relevant features from observation
@@ -73,36 +73,49 @@ class PolicyNetwork(nn.Module):
 
 def create_dummy_obs(max_units=16):
     """Create a dummy observation for initialization."""
-    # Create dummy arrays with proper shapes and types
-    # Create dummy arrays with proper shapes and types
-    position = jnp.zeros((2, max_units, 2), dtype=jnp.int16)  # (teams, units, coords)
-    energy = jnp.zeros((2, max_units), dtype=jnp.int16)  # (teams, units)
-    
-    # Create nested structures using struct.field
     @struct.dataclass
     class DummyUnitState:
-        position: chex.Array = struct.field(default_factory=lambda: position)
-        energy: chex.Array = struct.field(default_factory=lambda: energy)
+        position: chex.Array = struct.field(
+            default_factory=lambda: jnp.zeros((2, max_units, 2), dtype=jnp.int16)
+        )
+        energy: chex.Array = struct.field(
+            default_factory=lambda: jnp.zeros((2, max_units, 1), dtype=jnp.int16)
+        )
     
     @struct.dataclass
     class DummyMapTile:
-        energy: chex.Array = struct.field(default_factory=lambda: jnp.zeros((24, 24), dtype=jnp.int16))
-        tile_type: chex.Array = struct.field(default_factory=lambda: jnp.zeros((24, 24), dtype=jnp.int16))
+        energy: chex.Array = struct.field(
+            default_factory=lambda: jnp.zeros((24, 24), dtype=jnp.int16)
+        )
+        tile_type: chex.Array = struct.field(
+            default_factory=lambda: jnp.zeros((24, 24), dtype=jnp.int16)
+        )
     
     @struct.dataclass
     class DummyEnvObs:
         units: UnitState = struct.field(default_factory=DummyUnitState)
-        units_mask: chex.Array = struct.field(default_factory=lambda: jnp.zeros((2, max_units), dtype=jnp.bool_))
+        units_mask: chex.Array = struct.field(
+            default_factory=lambda: jnp.zeros((2, max_units), dtype=jnp.bool_)
+        )
         map_features: MapTile = struct.field(default_factory=DummyMapTile)
-        sensor_mask: chex.Array = struct.field(default_factory=lambda: jnp.zeros((2, 24, 24), dtype=jnp.bool_))
-        team_points: chex.Array = struct.field(default_factory=lambda: jnp.zeros((2,), dtype=jnp.int32))
-        team_wins: chex.Array = struct.field(default_factory=lambda: jnp.zeros((2,), dtype=jnp.int32))
+        sensor_mask: chex.Array = struct.field(
+            default_factory=lambda: jnp.zeros((2, 24, 24), dtype=jnp.bool_)
+        )
+        team_points: chex.Array = struct.field(
+            default_factory=lambda: jnp.zeros((2,), dtype=jnp.int32)
+        )
+        team_wins: chex.Array = struct.field(
+            default_factory=lambda: jnp.zeros((2,), dtype=jnp.int32)
+        )
         steps: int = struct.field(default=0)
         match_steps: int = struct.field(default=0)
-        relic_nodes: chex.Array = struct.field(default_factory=lambda: jnp.zeros((6, 2), dtype=jnp.int16))
-        relic_nodes_mask: chex.Array = struct.field(default_factory=lambda: jnp.zeros((6,), dtype=jnp.bool_))
+        relic_nodes: chex.Array = struct.field(
+            default_factory=lambda: jnp.zeros((6, 2), dtype=jnp.int16)
+        )
+        relic_nodes_mask: chex.Array = struct.field(
+            default_factory=lambda: jnp.zeros((6,), dtype=jnp.bool_)
+        )
     
-    # Create single EnvObs instance
     return DummyEnvObs()
 
 def create_policy(rng, hidden_dims=(64, 64), max_units=16, learning_rate=1e-3):
