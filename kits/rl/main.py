@@ -8,7 +8,10 @@ from lux.kit import from_json
 
 import jax
 import jax.numpy as jnp
+import flax
+import flax.traverse_util
 from flax import struct
+from flax.core import frozen_dict
 from policy import PolicyNetwork, create_dummy_obs
 from luxai_s3.state import EnvObs, UnitState, MapTile
 
@@ -75,31 +78,44 @@ class TrainedAgent:
         # Get unit mask to know which units we can control
         unit_mask = np.array(obs["units_mask"][self.team_id])
         
-        # Initialize actions array for all units
-        actions = np.zeros((self.env_cfg["max_units"], 3), dtype=np.int32)
+        # Initialize actions array for all units using JAX arrays
+        actions = jnp.zeros((self.env_cfg["max_units"], 3), dtype=jnp.int32)
         
         # If policy failed to load, fall back to random actions
         if self.policy is None:
-            for unit_id in np.where(unit_mask)[0]:
-                actions[unit_id] = np.array([
-                    np.random.randint(0, 5), 0, 0
-                ], dtype=np.int32)
-            return actions
+            key, subkey = jax.random.split(self.key)
+            self.key = key
+            random_actions = jax.random.randint(
+                subkey, 
+                shape=(jnp.sum(unit_mask), 1), 
+                minval=0, 
+                maxval=5
+            )
+            actions = actions.at[jnp.where(unit_mask)[0], 0].set(random_actions[:, 0])
+            return np.array(actions, dtype=np.int32)
         
-        # Create empty unit state first
-        unit_state = UnitState()
-        
-        # Initialize arrays with correct shapes
+        # Initialize arrays with zeros
         position = jnp.zeros((2, self.env_cfg["max_units"], 2), dtype=jnp.int16)
-        energy = jnp.zeros((2, self.env_cfg["max_units"], 1), dtype=jnp.int16)
+        energy = jnp.zeros((2, self.env_cfg["max_units"]), dtype=jnp.int16)
         
-        # Set current team's data
+        # Set current team's data - obs["units"] contains arrays for all teams
         position = position.at[self.team_id].set(
-            jnp.array(obs["units"][self.team_id]["position"], dtype=jnp.int16)
+            jnp.array(obs["units"]["position"][self.team_id], dtype=jnp.int16)
         )
         energy = energy.at[self.team_id].set(
-            jnp.expand_dims(jnp.array(obs["units"][self.team_id]["energy"], dtype=jnp.int16), axis=-1)
+            jnp.array(obs["units"]["energy"][self.team_id], dtype=jnp.int16)
         )
+        
+        # Set opponent team's data if available
+        position = position.at[self.opp_team_id].set(
+            jnp.array(obs["units"]["position"][self.opp_team_id], dtype=jnp.int16)
+        )
+        energy = energy.at[self.opp_team_id].set(
+            jnp.array(obs["units"]["energy"][self.opp_team_id], dtype=jnp.int16)
+        )
+        
+        # Create unit state with actual data directly
+        unit_state = UnitState(position=position, energy=energy)
         
         # Set opponent team's data if available
         if self.opp_team_id in obs["units"]:
@@ -110,18 +126,11 @@ class TrainedAgent:
                 jnp.expand_dims(jnp.array(obs["units"][self.opp_team_id]["energy"], dtype=jnp.int16), axis=-1)
             )
         
-        # Update unit state with proper shapes using struct.replace
-        unit_state = struct.replace(unit_state, position=position, energy=energy)
-        
-        empty_map_tile = MapTile()
-        map_features = struct.replace(
-            empty_map_tile,
+        # Create map features with actual data directly
+        map_features = MapTile(
             energy=jnp.array(obs["map_features"]["energy"], dtype=jnp.int16),
             tile_type=jnp.array(obs["map_features"]["tile_type"], dtype=jnp.int16)
         )
-        
-        # Create EnvObs object using struct.replace
-        empty_env_obs = EnvObs()
         
         # Create two-team unit mask
         units_mask = jnp.zeros((2, self.env_cfg["max_units"]), dtype=jnp.bool_)
@@ -131,8 +140,8 @@ class TrainedAgent:
                 jnp.array(obs["units_mask"][self.opp_team_id], dtype=jnp.bool_)
             )
         
-        env_obs = struct.replace(
-            empty_env_obs,
+        # Create EnvObs object with all required fields
+        env_obs = EnvObs(
             units=unit_state,
             units_mask=units_mask,  # Shape: (2, max_units)
             map_features=map_features,
@@ -145,8 +154,27 @@ class TrainedAgent:
             relic_nodes_mask=jnp.array(obs["relic_nodes_mask"], dtype=jnp.bool_)
         )
         
-        # Wrap in dictionary for policy
-        policy_obs = {self.player: env_obs}
+        # Convert EnvObs to dictionary format for policy network
+        policy_obs = {
+            self.player: {
+                "units": {
+                    "position": env_obs.units.position,
+                    "energy": env_obs.units.energy
+                },
+                "units_mask": env_obs.units_mask,
+                "map_features": {
+                    "energy": env_obs.map_features.energy,
+                    "tile_type": env_obs.map_features.tile_type
+                },
+                "sensor_mask": env_obs.sensor_mask,
+                "team_points": env_obs.team_points,
+                "team_wins": env_obs.team_wins,
+                "steps": env_obs.steps,
+                "match_steps": env_obs.match_steps,
+                "relic_nodes": env_obs.relic_nodes,
+                "relic_nodes_mask": env_obs.relic_nodes_mask
+            }
+        }
         
         # Generate action logits with exploration noise
         self.key, action_key = jax.random.split(self.key)
@@ -163,11 +191,13 @@ class TrainedAgent:
         logging.debug(f"Step {step} - Action distribution: {action_counts}")
         logging.debug(f"Step {step} - Active units: {active_units}")
         
-        # Set movement actions for valid units using numpy indexing
-        actions[self.team_id, :, 0] = movement_actions
+        # Set movement actions for valid units using JAX indexing
+        # Only set actions for the current team's units
+        actions = actions.at[jnp.where(unit_mask)[0], 0].set(team_actions[jnp.where(unit_mask)[0]])
         
-        # Return only current team's actions
-        return np.array(actions[self.team_id], dtype=np.int32)
+        # Convert to numpy array with correct shape (max_units, 3)
+        # Each action is [movement, 0, 0] as per Python starter kit
+        return np.array(actions, dtype=np.int32)
 
 # Global dictionary to store agent instances
 agent_dict = {}
@@ -197,6 +227,7 @@ def agent_fn(observation, configurations):
     # Get actions from agent
     actions = agent.act(step, from_json(obs), remainingOverageTime)
     
+    # Convert to list format like the Python starter kit
     return dict(action=actions.tolist())
 
 if __name__ == "__main__":
