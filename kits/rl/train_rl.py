@@ -31,12 +31,17 @@ def train_basic_env(num_episodes: int = int(os.environ.get("TRAIN_EPISODES", "10
         use_wandb = False
     else:
         wandb.login(key=wandb_api_key)
+        # Create descriptive run name with timestamp and parameters
+        run_name = f"train_{time.strftime('%Y%m%d_%H%M%S')}_ep{num_episodes}_seed{seed}"
         wandb.init(
             project="lux-s3-rl",
+            name=run_name,
             config={
                 "num_episodes": num_episodes,
                 "seed": seed,
                 "buffer_size": 1000,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "hostname": os.uname().nodename
             }
         )
         use_wandb = True
@@ -253,12 +258,8 @@ def train_basic_env(num_episodes: int = int(os.environ.get("TRAIN_EPISODES", "10
                     "episode": episode + 1,
                     "mean_reward_last_10": mean_reward,
                     "episode_reward": episode_reward,
-                    "loss": episode_losses[-1] if episode_losses else None,
-                    "exploration_weight": exploration_weight,
-                    "unique_positions": unique_positions,
-                    "current_unit_count": current_unit_count,
-                    "current_team_points": current_team_points
-                })
+                    "loss": episode_losses[-1] if episode_losses else None
+                }, step=episode + 1)
     
     # Save trained policy parameters
     # Convert policy parameters to flat numpy arrays
@@ -282,12 +283,10 @@ def train_basic_env(num_episodes: int = int(os.environ.get("TRAIN_EPISODES", "10
     logging.info("Saved model parameters to kits/rl/model_params.npz")
     
     if use_wandb:
-        # Log final metrics and model file
+        # Log final metrics only
         wandb.log({
-            "final_mean_reward": np.mean(total_rewards),
-            "total_episodes": num_episodes
-        })
-        wandb.save("kits/rl/model_params.npz")
+            "final_mean_reward": np.mean(total_rewards)
+        }, step=num_episodes)
         wandb.finish()
 
 def convert_obs_to_dict(raw_obs: Union[EnvObs, Dict[str, EnvObs]]) -> Dict[str, Dict[str, Any]]:
