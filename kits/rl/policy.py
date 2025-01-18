@@ -72,62 +72,40 @@ class PolicyNetwork(nn.Module):
         return masked_logits
 
 def create_dummy_obs(max_units=16):
-    """Create a dummy observation for initialization."""
-    @struct.dataclass
-    class DummyUnitState:
-        position: chex.Array = struct.field(
-            default_factory=lambda: jnp.zeros((2, max_units, 2), dtype=jnp.int16)
-        )
-        energy: chex.Array = struct.field(
-            default_factory=lambda: jnp.zeros((2, max_units), dtype=jnp.int16)
-        )
-    
-    @struct.dataclass
-    class DummyMapTile:
-        energy: chex.Array = struct.field(
-            default_factory=lambda: jnp.zeros((24, 24), dtype=jnp.int16)
-        )
-        tile_type: chex.Array = struct.field(
-            default_factory=lambda: jnp.zeros((24, 24), dtype=jnp.int16)
-        )
-    
-    @struct.dataclass
-    class DummyEnvObs:
-        units: UnitState = struct.field(default_factory=DummyUnitState)
-        units_mask: chex.Array = struct.field(
-            default_factory=lambda: jnp.zeros((2, max_units), dtype=jnp.bool_)
-        )
-        map_features: MapTile = struct.field(default_factory=DummyMapTile)
-        sensor_mask: chex.Array = struct.field(
-            default_factory=lambda: jnp.zeros((2, 24, 24), dtype=jnp.bool_)
-        )
-        team_points: chex.Array = struct.field(
-            default_factory=lambda: jnp.zeros((2,), dtype=jnp.int32)
-        )
-        team_wins: chex.Array = struct.field(
-            default_factory=lambda: jnp.zeros((2,), dtype=jnp.int32)
-        )
-        steps: int = struct.field(default=0)
-        match_steps: int = struct.field(default=0)
-        relic_nodes: chex.Array = struct.field(
-            default_factory=lambda: jnp.zeros((6, 2), dtype=jnp.int16)
-        )
-        relic_nodes_mask: chex.Array = struct.field(
-            default_factory=lambda: jnp.zeros((6,), dtype=jnp.bool_)
-        )
-    
-    return DummyEnvObs()
+    """Create a dummy observation dictionary for initialization."""
+    # Create dummy observation in raw dictionary format
+    dummy_obs = {
+        "units": {
+            "position": jnp.zeros((max_units, 2), dtype=jnp.int16),
+            "energy": jnp.zeros((max_units,), dtype=jnp.int16)
+        },
+        "units_mask": jnp.zeros((max_units,), dtype=jnp.bool_),
+        "map_features": {
+            "energy": jnp.zeros((24, 24), dtype=jnp.int16),
+            "tile_type": jnp.zeros((24, 24), dtype=jnp.int16)
+        },
+        "sensor_mask": jnp.zeros((24, 24), dtype=jnp.bool_),
+        "team_points": jnp.zeros((2,), dtype=jnp.int32),
+        "team_wins": jnp.zeros((2,), dtype=jnp.int32),
+        "steps": 0,
+        "match_steps": 0,
+        "relic_nodes": jnp.zeros((6, 2), dtype=jnp.int16),
+        "relic_nodes_mask": jnp.zeros((6,), dtype=jnp.bool_)
+    }
+    return dummy_obs
 
 def create_policy(rng, hidden_dims=(64, 64), max_units=16, learning_rate=1e-3):
     """Create and initialize the policy network and optimizer."""
     policy = PolicyNetwork(hidden_dims=hidden_dims)
-    # Initialize with dummy observation
+    
+    # Initialize with dummy observation dictionary
     dummy_obs = create_dummy_obs(max_units)
-    # Create observation dictionary for both players
     obs_dict = {
         "player_0": dummy_obs,
         "player_1": dummy_obs
     }
+    
+    # Initialize policy parameters
     params = policy.init(rng, obs_dict, "player_0")
     
     # Initialize optimizer
