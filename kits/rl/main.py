@@ -178,12 +178,12 @@ class TrainedAgent:
         
         # Generate action logits with exploration noise
         self.key, action_key = jax.random.split(self.key)
-        logits = self.policy.apply(self.policy_params, policy_obs, self.player)
+        logits = self.policy.apply(self.policy_params, policy_obs, self.player)  # Shape: (batch_size, max_units, num_actions)
         noise = jax.random.gumbel(action_key, logits.shape)
-        movement_actions = np.array(jnp.argmax(logits + noise, axis=-1))
+        movement_actions = np.array(jnp.argmax(logits + noise, axis=-1))  # Shape: (batch_size, max_units)
         
-        # Take actions for current team only
-        team_actions = movement_actions[self.team_id]
+        # Since we're using a single batch, movement_actions[0] gives us the actions for all units
+        team_actions = movement_actions[0]  # Shape: (max_units,)
         
         # Log action distribution and unit status
         action_counts = np.bincount(team_actions[unit_mask], minlength=5)
