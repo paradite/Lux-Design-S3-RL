@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 import optax
+import logging
 from typing import Sequence, Dict, Any, List, Optional
 from luxai_s3.state import EnvObs, UnitState, MapTile
 from flax import struct
@@ -59,12 +60,31 @@ class PolicyNetwork(nn.Module):
         pos_feature = units_pos  # Shape: (batch_size, max_units, 2)
         energy_feature = jnp.expand_dims(units_energy, axis=-1)  # Shape: (batch_size, max_units, 1)
         mask_feature = jnp.expand_dims(units_mask.astype(jnp.float32), axis=-1)  # Shape: (batch_size, max_units, 1)
+        team_idx_feature = jnp.ones_like(mask_feature, dtype=jnp.float32) * team_idx  # Shape: (batch_size, max_units, 1)
+        
+        # Log shapes and dtypes of input features
+        logging.info(f"Feature shapes and dtypes:")
+        logging.info(f"  pos_feature: shape={pos_feature.shape}, dtype={pos_feature.dtype}")
+        logging.info(f"  energy_feature: shape={energy_feature.shape}, dtype={energy_feature.dtype}")
+        logging.info(f"  mask_feature: shape={mask_feature.shape}, dtype={mask_feature.dtype}")
+        logging.info(f"  team_idx_feature: shape={team_idx_feature.shape}, dtype={team_idx_feature.dtype}")
         
         x = jnp.concatenate([
             pos_feature,  # Shape: (batch_size, max_units, 2)
             energy_feature,  # Shape: (batch_size, max_units, 1)
-            mask_feature  # Shape: (batch_size, max_units, 1)
-        ], axis=-1)  # Final shape: (batch_size, max_units, 4)
+            mask_feature,  # Shape: (batch_size, max_units, 1)
+            team_idx_feature  # Shape: (batch_size, max_units, 1)
+        ], axis=-1)  # Final shape: (batch_size, max_units, 5)
+        
+        # Log concatenated feature shape
+        logging.info(f"Concatenated feature tensor x: shape={x.shape}, dtype={x.dtype}")
+        
+        # Log value distributions
+        logging.info(f"Feature value ranges:")
+        logging.info(f"  pos_feature: min={jnp.min(pos_feature)}, max={jnp.max(pos_feature)}")
+        logging.info(f"  energy_feature: min={jnp.min(energy_feature)}, max={jnp.max(energy_feature)}")
+        logging.info(f"  mask_feature: min={jnp.min(mask_feature)}, max={jnp.max(mask_feature)}")
+        logging.info(f"  team_idx_feature: min={jnp.min(team_idx_feature)}, max={jnp.max(team_idx_feature)}")
         
         # Process each unit's features through the network
         batch_size = x.shape[0]
@@ -72,6 +92,7 @@ class PolicyNetwork(nn.Module):
         feature_dim = x.shape[2]
         
         # Reshape for dense layers while preserving batch structure
+        feature_dim = x.shape[-1]  # Now 5 dimensions: pos(2) + energy(1) + mask(1) + team_idx(1)
         x = x.reshape(-1, feature_dim)  # Shape: (batch_size * max_units, feature_dim)
         
         # Simple feedforward network

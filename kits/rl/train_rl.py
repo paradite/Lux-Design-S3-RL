@@ -66,9 +66,17 @@ def train_basic_env(num_episodes: int = 10) -> None:
         # Convert observation to policy format
         obs = convert_obs_to_dict(obs_dict)
         
+        # Alternate between training as player_0 and player_1
+        current_player = "player_0" if episode % 2 == 0 else "player_1"
+        opponent_player = "player_1" if current_player == "player_0" else "player_0"
+        current_team_idx = 0 if current_player == "player_0" else 1
+        opponent_team_idx = 1 - current_team_idx
+        
+        logging.info(f"Episode {episode} - Training as {current_player}")
+        
         # Log observation structure for debugging
         logging.info(f"Episode {episode} observation structure:")
-        for player in ["player_0", "player_1"]:
+        for player in [current_player, opponent_player]:
             player_obs = obs[player]
             logging.info(f"{player} observation shapes:")
             logging.info(f"  Units position: {player_obs['units']['position'].shape}")
@@ -91,25 +99,25 @@ def train_basic_env(num_episodes: int = 10) -> None:
             # Generate keys for action sampling
             key, key_p0, key_p1 = jax.random.split(key, 3)
             
-            # Sample actions for player_0 using the policy network
-            p0_actions = sample_action(policy, policy_state, obs, "player_0", key_p0)
+            # Sample actions for current player using the policy network
+            current_actions = sample_action(policy, policy_state, obs, current_player, key_p0)
             
             # Convert to full action format (movement + sap direction)
-            # Remove batch dimension from p0_actions since we're processing one step at a time
-            p0_actions_unbatched = p0_actions[0]  # Shape: (max_units,)
-            p0_full_actions = jnp.zeros((params.max_units, 3), dtype=jnp.int32)
-            p0_full_actions = p0_full_actions.at[:, 0].set(p0_actions_unbatched)
+            # Remove batch dimension since we're processing one step at a time
+            current_actions_unbatched = current_actions[0]  # Shape: (max_units,)
+            current_full_actions = jnp.zeros((params.max_units, 3), dtype=jnp.int32)
+            current_full_actions = current_full_actions.at[:, 0].set(current_actions_unbatched)
             
             # Random opponent actions
-            p1_full_actions = jnp.zeros((params.max_units, 3), dtype=jnp.int32)
-            p1_full_actions = p1_full_actions.at[:, 0].set(
+            opponent_full_actions = jnp.zeros((params.max_units, 3), dtype=jnp.int32)
+            opponent_full_actions = opponent_full_actions.at[:, 0].set(
                 jax.random.randint(key_p1, (params.max_units,), 0, 5)
             )
             
             # Create action dictionary for both players
             actions = {
-                "player_0": np.array(p0_full_actions),
-                "player_1": np.array(p1_full_actions)
+                current_player: np.array(current_full_actions),
+                opponent_player: np.array(opponent_full_actions)
             }
             
             # Store experience
@@ -151,7 +159,7 @@ def train_basic_env(num_episodes: int = 10) -> None:
                     "relic_nodes_mask": jnp.array(obs["player_1"]["relic_nodes_mask"])
                 }
             })
-            episode_actions.append(p0_actions)
+            episode_actions.append(current_actions)
             
             # Step environment
             key, step_key = jax.random.split(key)
@@ -162,9 +170,9 @@ def train_basic_env(num_episodes: int = 10) -> None:
             obs_dict = env.get_obs(state, params)
             obs = convert_obs_to_dict(obs_dict)
             
-            # Update reward based on team points and unit counts
-            current_team_points = float(obs["player_0"]["team_points"][0])
-            current_unit_count = float(np.sum(obs["player_0"]["units_mask"]))
+            # Update reward based on team points and unit counts for current player
+            current_team_points = float(obs[current_player]["team_points"][current_team_idx])
+            current_unit_count = float(np.sum(obs[current_player]["units_mask"]))
             current_reward = current_team_points + 0.1 * current_unit_count
             episode_reward += current_reward
             
@@ -175,11 +183,12 @@ def train_basic_env(num_episodes: int = 10) -> None:
             
             # Log step information
             if step_count % 10 == 0:
-                logging.info(f"Step {step_count} - Active units: {np.sum(obs['player_0']['units_mask'])}")
+                logging.info(f"Step {step_count} - Active units: {np.sum(obs[current_player]['units_mask'])}")
                 logging.info(f"Step {step_count} - Current reward: {current_reward:.2f}")
+                logging.info(f"Step {step_count} - Training as: {current_player}")
             
             # Check termination
-            done = jnp.any(done_flags["player_0"])
+            done = jnp.any(done_flags[current_player])
         
         # Store episode data
         total_rewards.append(episode_reward)
