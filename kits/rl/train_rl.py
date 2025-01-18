@@ -12,14 +12,18 @@ from luxai_s3.params import EnvParams
 from policy import create_policy, sample_action, update_step
 import logging
 
-def train_basic_env(num_episodes: int = 100) -> None:
-    """Train a policy gradient agent for the Lux AI Season 3 environment."""
+def train_basic_env(num_episodes: int = int(os.environ.get("TRAIN_EPISODES", "100"))) -> None:
+    """Train a policy gradient agent for the Lux AI Season 3 environment.
+    
+    Args:
+        num_episodes: Number of episodes to train for. Can be set via TRAIN_EPISODES environment variable.
+                     Defaults to 100 if not set.
+    """
     # Initialize logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler("training.log"),
             logging.StreamHandler()
         ]
     )
