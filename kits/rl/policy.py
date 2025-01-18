@@ -59,16 +59,20 @@ class PolicyNetwork(nn.Module):
             x = nn.relu(x)
         
         # Output layer for action logits
-        action_logits = nn.Dense(self.num_actions)(x)
+        action_logits = nn.Dense(self.num_actions)(x)  # Shape: (max_units, num_actions)
+        
+        # Reshape mask for broadcasting
+        mask = team_mask[..., None]  # Shape: (max_units, 1)
+        mask = jnp.broadcast_to(mask, action_logits.shape)  # Shape: (max_units, num_actions)
         
         # Mask invalid units
-        action_logits = jnp.where(
-            units_mask[:, None],
+        masked_logits = jnp.where(
+            mask,
             action_logits,
-            -1e9  # Large negative number for masked units
+            jnp.full_like(action_logits, -1e9)  # Large negative number for masked units
         )
         
-        return action_logits
+        return masked_logits
 
 def create_dummy_obs(max_units=16):
     """Create a dummy observation for initialization."""
