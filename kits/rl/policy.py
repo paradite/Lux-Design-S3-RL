@@ -66,12 +66,11 @@ class PolicyNetwork(nn.Module):
         action_logits = nn.Dense(self.num_actions)(x)  # Shape: (max_units, num_actions)
         
         # Reshape mask for broadcasting
-        mask = jnp.expand_dims(units_mask, axis=-1)  # Shape: (max_units, 1)
-        mask = jnp.broadcast_to(mask, action_logits.shape)  # Shape: (max_units, num_actions)
+        mask = jnp.broadcast_to(mask_feature, action_logits.shape)  # Shape: (max_units, num_actions)
         
         # Mask invalid units
         masked_logits = jnp.where(
-            mask,
+            mask > 0,  # mask_feature is float32, so compare with 0
             action_logits,
             jnp.full_like(action_logits, -1e9)  # Large negative number for masked units
         )
@@ -192,8 +191,10 @@ def compute_loss(policy, params, obs_batch: Dict[str, EnvObs], action_batch, rew
     
     # Mask out invalid units using player_0's mask
     valid_mask = obs_batch["player_0"].units_mask  # Get player_0's mask
+    # Convert to float32 for proper masking
+    valid_mask = valid_mask.astype(jnp.float32)
     log_probs = jnp.where(
-        valid_mask,
+        valid_mask > 0,
         jnp.log(selected_probs + 1e-8),
         0.0
     )
