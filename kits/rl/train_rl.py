@@ -81,7 +81,8 @@ def train_basic_env(num_episodes: int = 100) -> None:
         # Reset environment
         key, reset_key = jax.random.split(key)
         # Reset environment and get initial observation
-        obs, state = env.reset(reset_key, params)  # obs is EnvObs
+        raw_obs, state = env.reset(reset_key, params)  # raw_obs is EnvObs
+        obs = raw_obs  # Use raw observation directly
         
         episode_reward = jnp.array(0.0)
         done = False
@@ -92,8 +93,14 @@ def train_basic_env(num_episodes: int = 100) -> None:
             # Generate keys for action sampling
             key, key_p0, key_p1 = jax.random.split(key, 3)
             
+            # Create observation dictionary for both players
+            obs_dict = {
+                "player_0": obs,
+                "player_1": obs
+            }
+            
             # Sample actions for player_0 using the policy network
-            p0_actions = sample_action(policy, policy_state.params, obs, key_p0, team_idx=0)
+            p0_actions = sample_action(policy, policy_state.params, obs_dict, "player_0", key_p0)
             
             # Convert to full action format (movement + sap direction)
             p0_full_actions = jnp.zeros((params.max_units, 3), dtype=jnp.int32)
