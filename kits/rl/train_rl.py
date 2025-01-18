@@ -105,11 +105,14 @@ def train_basic_env(num_episodes: int = 100) -> None:
                 jax.random.randint(key_p1, (params.max_units,), 0, 5)
             )
             
-            # Stack actions for both teams
-            actions = jnp.stack([p0_full_actions, p1_full_actions])
+            # Create action dictionary for both players
+            actions = {
+                "player_0": np.array(p0_full_actions),
+                "player_1": np.array(p1_full_actions)
+            }
             
             # Store experience
-            episode_observations.append(obs)  # Store full observation dictionary
+            episode_observations.append(obs)
             episode_actions.append(p0_actions)
             
             # Step environment
