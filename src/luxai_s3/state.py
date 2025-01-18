@@ -17,14 +17,14 @@ ENERGY_NODE_FNS = [
 ]
 
 @struct.dataclass
-class UnitState:
+class UnitState(struct.PyTreeNode):
     position: chex.Array
     """Position of the unit with shape (2) for x, y"""
     energy: int
     """Energy of the unit"""
 
 @struct.dataclass
-class MapTile:
+class MapTile(struct.PyTreeNode):
     energy: int
     """Energy of the tile, generated via energy_nodes and energy_node_fns"""
     tile_type: int
@@ -89,7 +89,7 @@ class EnvState:
     """steps taken in the current match"""
     
 @struct.dataclass
-class EnvObs:
+class EnvObs(struct.PyTreeNode):
     """Partial observation of environment"""
     units: UnitState
     """Units in the environment with shape (T, N, 3) for T teams, N max units, and 3 features.
