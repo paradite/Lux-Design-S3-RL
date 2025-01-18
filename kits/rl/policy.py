@@ -5,8 +5,8 @@ import flax.core
 import optax
 from typing import Sequence, Dict, Any, List
 from luxai_s3.state import EnvObs, UnitState, MapTile
-from flax import struct, serialization
-from flax.core import freeze, FrozenDict
+from flax import struct
+import chex
 
 class PolicyState:
     """State of the policy network."""
@@ -76,33 +76,31 @@ def create_dummy_obs(max_units=16):
     dummy_relic_nodes = jnp.zeros((6, 2), dtype=jnp.int16)
     dummy_relic_nodes_mask = jnp.zeros((6,), dtype=jnp.bool_)
     
-    # Create nested structures using frozen dictionaries
-    unit_state_dict = freeze({
-        'position': dummy_position,
-        'energy': dummy_energy
-    })
+    # Create nested structures using struct.field
+    @struct.dataclass
+    class DummyUnitState:
+        position: chex.Array = struct.field(default_factory=lambda: dummy_position)
+        energy: chex.Array = struct.field(default_factory=lambda: dummy_energy)
     
-    map_tile_dict = freeze({
-        'energy': dummy_map_energy,
-        'tile_type': dummy_map_tile_type
-    })
+    @struct.dataclass
+    class DummyMapTile:
+        energy: chex.Array = struct.field(default_factory=lambda: dummy_map_energy)
+        tile_type: chex.Array = struct.field(default_factory=lambda: dummy_map_tile_type)
     
-    # Create full observation dictionary
-    obs_dict = freeze({
-        'units': unit_state_dict,
-        'units_mask': dummy_units_mask,
-        'map_features': map_tile_dict,
-        'sensor_mask': dummy_sensor_mask,
-        'team_points': dummy_team_points,
-        'team_wins': dummy_team_wins,
-        'steps': 0,
-        'match_steps': 0,
-        'relic_nodes': dummy_relic_nodes,
-        'relic_nodes_mask': dummy_relic_nodes_mask
-    })
+    @struct.dataclass
+    class DummyEnvObs:
+        units: UnitState = struct.field(default_factory=lambda: DummyUnitState())
+        units_mask: chex.Array = struct.field(default_factory=lambda: dummy_units_mask)
+        map_features: MapTile = struct.field(default_factory=lambda: DummyMapTile())
+        sensor_mask: chex.Array = struct.field(default_factory=lambda: dummy_sensor_mask)
+        team_points: chex.Array = struct.field(default_factory=lambda: dummy_team_points)
+        team_wins: chex.Array = struct.field(default_factory=lambda: dummy_team_wins)
+        steps: int = struct.field(default=0)
+        match_steps: int = struct.field(default=0)
+        relic_nodes: chex.Array = struct.field(default_factory=lambda: dummy_relic_nodes)
+        relic_nodes_mask: chex.Array = struct.field(default_factory=lambda: dummy_relic_nodes_mask)
     
-    # Convert frozen dict to EnvObs
-    return flax.serialization.from_state_dict(EnvObs(), obs_dict)
+    return DummyEnvObs()
 
 def create_policy(rng, hidden_dims=(64, 64), max_units=16, learning_rate=1e-3):
     """Create and initialize the policy network and optimizer."""
