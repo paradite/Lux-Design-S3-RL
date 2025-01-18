@@ -29,7 +29,7 @@ class PolicyNetwork(nn.Module):
         """
         # Get current player's observation
         player_obs = obs[player]
-        team_idx = 0 if player == "player_0" else 1
+        team_idx = jnp.array(0 if player == "player_0" else 1, dtype=jnp.int32)
         
         # Extract relevant features from observation
         # Get position and energy from UnitState dataclass
@@ -41,13 +41,13 @@ class PolicyNetwork(nn.Module):
         units_mask = player_obs.units_mask  # Shape: (2, max_units)
         
         # Get current team's features using JAX indexing
-        pos_feature = jnp.index_select(units_pos, team_idx, axis=0)  # Shape: (max_units, 2)
+        pos_feature = jnp.take(units_pos, team_idx, axis=0)  # Shape: (max_units, 2)
         energy_feature = jnp.expand_dims(
-            jnp.index_select(units_energy, team_idx, axis=0),
+            jnp.take(units_energy, team_idx, axis=0),
             axis=-1
         )  # Shape: (max_units, 1)
         mask_feature = jnp.expand_dims(
-            jnp.index_select(units_mask, team_idx, axis=0).astype(jnp.float32),
+            jnp.take(units_mask, team_idx, axis=0).astype(jnp.float32),
             axis=-1
         )  # Shape: (max_units, 1)
         
