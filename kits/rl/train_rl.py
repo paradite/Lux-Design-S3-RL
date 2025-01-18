@@ -74,19 +74,20 @@ def train_basic_env(num_episodes: int = 20) -> None:
         
         logging.info(f"Episode {episode} - Training as {current_player}")
         
-        # Log observation structure for debugging
-        logging.info(f"Episode {episode} observation structure:")
-        for player in [current_player, opponent_player]:
-            player_obs = obs[player]
-            logging.info(f"{player} observation shapes:")
-            logging.info(f"  Units position: {player_obs['units']['position'].shape}")
-            logging.info(f"  Units energy: {player_obs['units']['energy'].shape}")
-            logging.info(f"  Units mask: {player_obs['units_mask'].shape}")
-            logging.info(f"  Map features energy: {player_obs['map_features']['energy'].shape}")
-            logging.info(f"  Map features tile type: {player_obs['map_features']['tile_type'].shape}")
-            logging.info(f"  Sensor mask: {player_obs['sensor_mask'].shape}")
-            logging.info(f"  Relic nodes: {player_obs['relic_nodes'].shape}")
-            logging.info(f"  Relic nodes mask: {player_obs['relic_nodes_mask'].shape}")
+        # Log observation structure for debugging only at the start of training
+        if episode == 0:
+            logging.info(f"Initial observation structure:")
+            for player in [current_player, opponent_player]:
+                player_obs = obs[player]
+                logging.info(f"{player} observation shapes:")
+                logging.info(f"  Units position: {player_obs['units']['position'].shape}")
+                logging.info(f"  Units energy: {player_obs['units']['energy'].shape}")
+                logging.info(f"  Units mask: {player_obs['units_mask'].shape}")
+                logging.info(f"  Map features energy: {player_obs['map_features']['energy'].shape}")
+                logging.info(f"  Map features tile type: {player_obs['map_features']['tile_type'].shape}")
+                logging.info(f"  Sensor mask: {player_obs['sensor_mask'].shape}")
+                logging.info(f"  Relic nodes: {player_obs['relic_nodes'].shape}")
+                logging.info(f"  Relic nodes mask: {player_obs['relic_nodes_mask'].shape}")
         
         episode_reward = 0.0
         done = False
@@ -187,15 +188,12 @@ def train_basic_env(num_episodes: int = 20) -> None:
             current_reward = current_team_points + 0.1 * current_unit_count + exploration_bonus
             episode_reward += current_reward
             
-            # Log reward components for debugging
-            logging.info(f"Step {step_count} - Team points: {current_team_points:.2f}")
-            logging.info(f"Step {step_count} - Unit count contribution: {0.1 * current_unit_count:.2f}")
-            logging.info(f"Step {step_count} - Total reward: {current_reward:.2f}")
-            
-            # Log step information
-            if step_count % 10 == 0:
+            # Log reward components less frequently
+            if step_count % 50 == 0:
+                logging.info(f"Step {step_count} - Team points: {current_team_points:.2f}")
+                logging.info(f"Step {step_count} - Unit count contribution: {0.1 * current_unit_count:.2f}")
+                logging.info(f"Step {step_count} - Total reward: {current_reward:.2f}")
                 logging.info(f"Step {step_count} - Active units: {np.sum(obs[current_player]['units_mask'])}")
-                logging.info(f"Step {step_count} - Current reward: {current_reward:.2f}")
                 logging.info(f"Step {step_count} - Training as: {current_player}")
             
             # Check termination
