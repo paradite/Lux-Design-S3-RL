@@ -117,13 +117,13 @@ def create_policy(rng, hidden_dims=(64, 64), max_units=16, learning_rate=1e-3):
     
     return policy, policy_state, optimizer
 
-def sample_action(policy, params, obs: Dict[str, EnvObs], player: str, rng):
+def sample_action(policy, params, obs: Dict[str, Dict[str, Any]], player: str, rng):
     """Sample actions from the policy for all units.
     
     Args:
         policy: PolicyNetwork instance
         params: Policy parameters
-        obs: Dictionary mapping player to their EnvObs
+        obs: Dictionary mapping player to their raw observation dictionary
         player: Current player ("player_0" or "player_1")
         rng: JAX random key
     
