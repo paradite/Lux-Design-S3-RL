@@ -44,10 +44,15 @@ class PolicyNetwork(nn.Module):
         team_mask = jnp.take(units_mask, team_idx, axis=0)  # Shape: (max_units,)
         
         # Process each unit independently
+        # Ensure consistent shapes before concatenation
+        pos_feature = team_pos  # Already (max_units, 2)
+        energy_feature = team_energy[..., None]  # Add dimension to get (max_units, 1)
+        mask_feature = team_mask.astype(jnp.float32)[..., None]  # Add dimension to get (max_units, 1)
+        
         x = jnp.concatenate([
-            team_pos,  # Shape: (max_units, 2)
-            jnp.expand_dims(team_energy, axis=-1),  # Shape: (max_units, 1)
-            jnp.expand_dims(team_mask.astype(jnp.float32), axis=-1)  # Shape: (max_units, 1)
+            pos_feature,  # Shape: (max_units, 2)
+            energy_feature,  # Shape: (max_units, 1)
+            mask_feature  # Shape: (max_units, 1)
         ], axis=-1)  # Final shape: (max_units, 4)
         
         # Simple feedforward network
@@ -79,7 +84,7 @@ def create_dummy_obs(max_units=16):
             default_factory=lambda: jnp.zeros((2, max_units, 2), dtype=jnp.int16)
         )
         energy: chex.Array = struct.field(
-            default_factory=lambda: jnp.zeros((2, max_units, 1), dtype=jnp.int16)
+            default_factory=lambda: jnp.zeros((2, max_units), dtype=jnp.int16)
         )
     
     @struct.dataclass
