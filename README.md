@@ -40,7 +40,7 @@ Then upload the replay.json to the online visualizer here: https://s3vis.lux-ai.
 
 ## GPU Acceleration
 
-Jax will already provide some decent CPU based parallelization for batch running the environment. A GPU or TPU however can increase the environment throughput much more however.
+Jax will already provide some decent CPU based parallelization for batch running the environment. A GPU or TPU can increase the environment throughput much more.
 
 To install jax with GPU/TPU support, you can follow the instructions [here](https://jax.readthedocs.io/en/latest/installation.html).
 
