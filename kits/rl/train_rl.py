@@ -5,6 +5,7 @@ import optax
 import chex
 import os
 import flax
+import time
 from typing import Dict, Any, Tuple, List, Union
 from luxai_s3.state import EnvObs, EnvState
 from luxai_s3.env import LuxAIS3Env
@@ -12,12 +13,15 @@ from luxai_s3.params import EnvParams
 from policy import create_policy, sample_action, update_step
 import logging
 
-def train_basic_env(num_episodes: int = int(os.environ.get("TRAIN_EPISODES", "100"))) -> None:
+def train_basic_env(num_episodes: int = int(os.environ.get("TRAIN_EPISODES", "100")), 
+                   seed: int = int(os.environ.get("TRAIN_SEED", str(int(time.time()))))) -> None:
     """Train a policy gradient agent for the Lux AI Season 3 environment.
     
     Args:
         num_episodes: Number of episodes to train for. Can be set via TRAIN_EPISODES environment variable.
                      Defaults to 100 if not set.
+        seed: Random seed for training. Can be set via TRAIN_SEED environment variable.
+              Defaults to current timestamp if not set.
     """
     # Initialize logging
     logging.basicConfig(
@@ -37,7 +41,8 @@ def train_basic_env(num_episodes: int = int(os.environ.get("TRAIN_EPISODES", "10
     params: EnvParams = env.default_params
     
     # Initialize random key for JAX
-    rng = jax.random.PRNGKey(0)
+    logging.info(f"Using random seed: {seed}")
+    rng = jax.random.PRNGKey(seed)
     rng, policy_rng = jax.random.split(rng)
     policy, policy_state, optimizer = create_policy(policy_rng)
     
