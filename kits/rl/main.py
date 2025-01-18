@@ -36,12 +36,20 @@ class TrainedAgent:
         # Load trained parameters and initialize policy
         try:
             data = np.load(os.path.join(os.path.dirname(__file__), "model_params.npz"))
-            self.policy_params = jax.tree_map(jnp.array, data["policy_params"])
-            self.mean_reward = data.get("mean_reward", 0.0)
+            # Load model architecture parameters
+            self.mean_reward = float(data["mean_reward"])
             self.hidden_dims = tuple(data["hidden_dims"])
             
             # Initialize policy network
             self.policy = PolicyNetwork(hidden_dims=self.hidden_dims)
+            
+            # Reconstruct nested dictionary for parameters
+            flat_params = {k: jnp.array(v) for k, v in data.items() 
+                         if k not in ["mean_reward", "hidden_dims", "max_units", "num_actions"]}
+            nested_params = flax.traverse_util.unflatten_dict(
+                {tuple(k.split(".")): v for k, v in flat_params.items()}
+            )
+            self.policy_params = flax.core.frozen_dict.freeze(nested_params)
             
             logging.info(f"Successfully loaded model for player {player}")
             logging.info(f"Model architecture: hidden_dims={self.hidden_dims}")
@@ -50,10 +58,15 @@ class TrainedAgent:
         except Exception as e:
             logging.error(f"Could not load model parameters: {e}")
             # Initialize with dummy parameters
+            # Initialize with dummy parameters
             dummy_obs = create_dummy_obs()
+            obs_dict = {
+                "player_0": dummy_obs,
+                "player_1": dummy_obs
+            }
             self.policy = PolicyNetwork(hidden_dims=(64, 64))
             self.key, init_key = jax.random.split(self.key)
-            self.policy_params = self.policy.init(init_key, dummy_obs)
+            self.policy_params = self.policy.init(init_key, obs_dict, "player_0")
             self.mean_reward = 0.0
             self.hidden_dims = (64, 64)
 
@@ -73,19 +86,19 @@ class TrainedAgent:
                 ], dtype=np.int32)
             return actions
         
-        # Create proper observation structure using struct.replace
-        empty_unit_state = UnitState()
+        # Create empty unit state first
+        unit_state = UnitState()
         
-        # Create unit state with position and energy for both teams
+        # Initialize arrays with correct shapes
         position = jnp.zeros((2, self.env_cfg["max_units"], 2), dtype=jnp.int16)
-        energy = jnp.zeros((2, self.env_cfg["max_units"]), dtype=jnp.int16)
+        energy = jnp.zeros((2, self.env_cfg["max_units"], 1), dtype=jnp.int16)
         
         # Set current team's data
         position = position.at[self.team_id].set(
             jnp.array(obs["units"][self.team_id]["position"], dtype=jnp.int16)
         )
         energy = energy.at[self.team_id].set(
-            jnp.array(obs["units"][self.team_id]["energy"], dtype=jnp.int16)
+            jnp.expand_dims(jnp.array(obs["units"][self.team_id]["energy"], dtype=jnp.int16), axis=-1)
         )
         
         # Set opponent team's data if available
@@ -94,15 +107,11 @@ class TrainedAgent:
                 jnp.array(obs["units"][self.opp_team_id]["position"], dtype=jnp.int16)
             )
             energy = energy.at[self.opp_team_id].set(
-                jnp.array(obs["units"][self.opp_team_id]["energy"], dtype=jnp.int16)
+                jnp.expand_dims(jnp.array(obs["units"][self.opp_team_id]["energy"], dtype=jnp.int16), axis=-1)
             )
         
-        # Create unit state with proper shapes
-        unit_state = struct.replace(
-            empty_unit_state,
-            position=position,  # Shape: (2, max_units, 2)
-            energy=energy  # Shape: (2, max_units)
-        )
+        # Update unit state with proper shapes using struct.replace
+        unit_state = struct.replace(unit_state, position=position, energy=energy)
         
         empty_map_tile = MapTile()
         map_features = struct.replace(

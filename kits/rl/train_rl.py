@@ -3,35 +3,18 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import chex
-from typing import Dict, Any, Tuple, List
+import os
+import flax
+from typing import Dict, Any, Tuple, List, Union
 from luxai_s3.state import EnvObs, EnvState
 from luxai_s3.env import LuxAIS3Env
 from luxai_s3.params import EnvParams
 from policy import create_policy, sample_action, update_step
+import logging
 
-def train_basic_env(num_episodes: int = 100) -> None:
-    """
-    Train a policy gradient agent for the Lux AI Season 3 environment.
-    Uses a simple policy network to learn unit movement strategies.
-    
-    Args:
-        num_episodes: Number of episodes to train for
-        
-    The agent learns through direct policy gradient updates, using:
-    - Policy network for action selection
-    - Episode-based rewards for policy updates
-    - Experience buffer for stable learning
-    - Reward normalization for training stability
-    
-    Returns:
-        None. Saves trained model parameters to kits/rl/model_params.npz
-    
-    Note:
-        Throughout this function, obs is of type Dict[str, EnvObs] where:
-        - The keys are "player_0" and "player_1"
-        - The values are EnvObs objects containing the observation for each player
-    """
-    import logging
+def train_basic_env(num_episodes: int = 10) -> None:
+    """Train a policy gradient agent for the Lux AI Season 3 environment."""
+    # Initialize logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
@@ -41,93 +24,81 @@ def train_basic_env(num_episodes: int = 100) -> None:
         ]
     )
     
-    # Initialize environment and types
+    # Initialize environment and policy
     env: LuxAIS3Env = LuxAIS3Env()
     params: EnvParams = env.default_params
     
-    # Type annotation for obs that will be used throughout the function
-    # Note: obs is a dictionary containing observations for both teams
-    obs: Dict[str, Any]
+    # Initialize random key for JAX
+    key: chex.PRNGKey = jax.random.PRNGKey(0)
+    key, policy_key = jax.random.split(key)
+    policy, policy_state, optimizer = create_policy(policy_key)
     
+    # Initialize metrics and buffers
+    total_rewards: List[float] = []
+    episode_losses: List[float] = []
+    buffer_size = 1000
+    
+    # Initialize experience buffers
+    episode_observations: List[Dict[str, Dict[str, Any]]] = []
+    episode_actions: List[jnp.ndarray] = []
+    episode_rewards: List[float] = []
+    
+    all_observations: List[Dict[str, Dict[str, Any]]] = []
+    all_actions: List[jnp.ndarray] = []
+    all_rewards: List[float] = []
+    
+    # Log training parameters
     logging.info("Starting training with parameters:")
     logging.info(f"Max steps per match: {params.max_steps_in_match}")
     logging.info(f"Max units: {params.max_units}")
     logging.info(f"Map size: {params.map_width}x{params.map_height}")
     logging.info(f"Number of teams: {params.num_teams}")
     
-    # Initialize random key for JAX
-    key: chex.PRNGKey = jax.random.PRNGKey(0)
-    
-    # Initialize policy network and optimizer
-    key, policy_key = jax.random.split(key)
-    policy, policy_state, optimizer = create_policy(policy_key)
-    
-    # Track metrics
-    total_rewards: List[float] = []
-    episode_losses: List[float] = []
-    
-    # Initialize experience buffers for the episode
-    episode_observations: List[Dict[str, Any]] = []
-    episode_actions: List[chex.Array] = []
-    episode_rewards: List[float] = []
-    
-    # Buffer for collecting experience across episodes
-    buffer_size = 1000
-    all_observations: List[Dict[str, Any]] = []
-    all_actions: List[chex.Array] = []
-    all_rewards: List[float] = []
-    
+    # Training loop
     for episode in range(num_episodes):
         # Reset environment
         key, reset_key = jax.random.split(key)
-        # Reset environment and get initial observation
-        raw_obs, state = env.reset(reset_key, params)  # raw_obs is a dictionary
-        obs = raw_obs  # Use raw observation directly
+        raw_obs, state = env.reset(reset_key, params)
         
-        episode_reward = jnp.array(0.0)
+        # Get observation dictionary from environment
+        obs_dict = env.get_obs(state, params)
+        
+        # Convert observation to policy format
+        obs = convert_obs_to_dict(obs_dict)
+        
+        # Log observation structure for debugging
+        logging.info(f"Episode {episode} observation structure:")
+        for player in ["player_0", "player_1"]:
+            player_obs = obs[player]
+            logging.info(f"{player} observation shapes:")
+            logging.info(f"  Units position: {player_obs['units']['position'].shape}")
+            logging.info(f"  Units energy: {player_obs['units']['energy'].shape}")
+            logging.info(f"  Units mask: {player_obs['units_mask'].shape}")
+            logging.info(f"  Map features energy: {player_obs['map_features']['energy'].shape}")
+            logging.info(f"  Map features tile type: {player_obs['map_features']['tile_type'].shape}")
+            logging.info(f"  Sensor mask: {player_obs['sensor_mask'].shape}")
+            logging.info(f"  Relic nodes: {player_obs['relic_nodes'].shape}")
+            logging.info(f"  Relic nodes mask: {player_obs['relic_nodes_mask'].shape}")
+        
+        episode_reward = 0.0
         done = False
         step_count = 0
         
+        # Episode loop
         while not done and step_count < params.max_steps_in_match:
             step_count += 1
+            
             # Generate keys for action sampling
             key, key_p0, key_p1 = jax.random.split(key, 3)
             
-            # Create observation dictionary for both players
-            # Note: raw_obs is already a dictionary with the correct format
-            obs_dict = {
-                "player_0": {
-                    "units": obs["units"][0],  # Team 0's units
-                    "units_mask": obs["units_mask"][0],  # Team 0's unit mask
-                    "map_features": obs["map_features"],
-                    "sensor_mask": obs["sensor_mask"][0],
-                    "team_points": obs["team_points"],
-                    "team_wins": obs["team_wins"],
-                    "steps": obs["steps"],
-                    "match_steps": obs["match_steps"],
-                    "relic_nodes": obs["relic_nodes"],
-                    "relic_nodes_mask": obs["relic_nodes_mask"]
-                },
-                "player_1": {
-                    "units": obs["units"][1],  # Team 1's units
-                    "units_mask": obs["units_mask"][1],  # Team 1's unit mask
-                    "map_features": obs["map_features"],
-                    "sensor_mask": obs["sensor_mask"][1],
-                    "team_points": obs["team_points"],
-                    "team_wins": obs["team_wins"],
-                    "steps": obs["steps"],
-                    "match_steps": obs["match_steps"],
-                    "relic_nodes": obs["relic_nodes"],
-                    "relic_nodes_mask": obs["relic_nodes_mask"]
-                }
-            }
-            
             # Sample actions for player_0 using the policy network
-            p0_actions = sample_action(policy, policy_state.params, obs_dict, "player_0", key_p0)
+            p0_actions = sample_action(policy, policy_state, obs, "player_0", key_p0)
             
             # Convert to full action format (movement + sap direction)
+            # Remove batch dimension from p0_actions since we're processing one step at a time
+            p0_actions_unbatched = p0_actions[0]  # Shape: (max_units,)
             p0_full_actions = jnp.zeros((params.max_units, 3), dtype=jnp.int32)
-            p0_full_actions = p0_full_actions.at[:, 0].set(p0_actions)
+            p0_full_actions = p0_full_actions.at[:, 0].set(p0_actions_unbatched)
             
             # Random opponent actions
             p1_full_actions = jnp.zeros((params.max_units, 3), dtype=jnp.int32)
@@ -142,30 +113,77 @@ def train_basic_env(num_episodes: int = 100) -> None:
             }
             
             # Store experience
-            episode_observations.append(obs)
+            episode_observations.append({
+                "player_0": {
+                    "units": {
+                        "position": jnp.array(obs["player_0"]["units"]["position"]),
+                        "energy": jnp.array(obs["player_0"]["units"]["energy"])
+                    },
+                    "units_mask": jnp.array(obs["player_0"]["units_mask"]),
+                    "map_features": {
+                        "energy": jnp.array(obs["player_0"]["map_features"]["energy"]),
+                        "tile_type": jnp.array(obs["player_0"]["map_features"]["tile_type"])
+                    },
+                    "sensor_mask": jnp.array(obs["player_0"]["sensor_mask"]),
+                    "team_points": jnp.array(obs["player_0"]["team_points"]),
+                    "team_wins": jnp.array(obs["player_0"]["team_wins"]),
+                    "steps": obs["player_0"]["steps"],
+                    "match_steps": obs["player_0"]["match_steps"],
+                    "relic_nodes": jnp.array(obs["player_0"]["relic_nodes"]),
+                    "relic_nodes_mask": jnp.array(obs["player_0"]["relic_nodes_mask"])
+                },
+                "player_1": {
+                    "units": {
+                        "position": jnp.array(obs["player_1"]["units"]["position"]),
+                        "energy": jnp.array(obs["player_1"]["units"]["energy"])
+                    },
+                    "units_mask": jnp.array(obs["player_1"]["units_mask"]),
+                    "map_features": {
+                        "energy": jnp.array(obs["player_1"]["map_features"]["energy"]),
+                        "tile_type": jnp.array(obs["player_1"]["map_features"]["tile_type"])
+                    },
+                    "sensor_mask": jnp.array(obs["player_1"]["sensor_mask"]),
+                    "team_points": jnp.array(obs["player_1"]["team_points"]),
+                    "team_wins": jnp.array(obs["player_1"]["team_wins"]),
+                    "steps": obs["player_1"]["steps"],
+                    "match_steps": obs["player_1"]["match_steps"],
+                    "relic_nodes": jnp.array(obs["player_1"]["relic_nodes"]),
+                    "relic_nodes_mask": jnp.array(obs["player_1"]["relic_nodes_mask"])
+                }
+            })
             episode_actions.append(p0_actions)
             
             # Step environment
             key, step_key = jax.random.split(key)
-            # Step environment - returns (obs, state, rewards, done, info)
-            raw_obs, state, rewards, done_flags, info = env.step(step_key, state, actions, params)
+            step_result = env.step(step_key, state, actions, params)
+            raw_obs, state, rewards, done_flags = step_result[:4]  # Unpack only what we need
             
-            # Use raw observation directly since it's already an EnvObs
-            obs = raw_obs
+            # Get observation dictionary and convert to policy format
+            obs_dict = env.get_obs(state, params)
+            obs = convert_obs_to_dict(obs_dict)
             
-            # Get reward and update episode reward
-            current_reward = float(rewards[0])  # First team's reward
-            episode_reward = episode_reward + jnp.array(current_reward)
+            # Update reward based on team points and unit counts
+            current_team_points = float(obs["player_0"]["team_points"][0])
+            current_unit_count = float(np.sum(obs["player_0"]["units_mask"]))
+            current_reward = current_team_points + 0.1 * current_unit_count
+            episode_reward += current_reward
             
-            # Check termination status using done flags
-            done = jnp.any(done_flags[0])
+            # Log reward components for debugging
+            logging.info(f"Step {step_count} - Team points: {current_team_points:.2f}")
+            logging.info(f"Step {step_count} - Unit count contribution: {0.1 * current_unit_count:.2f}")
+            logging.info(f"Step {step_count} - Total reward: {current_reward:.2f}")
+            
+            # Log step information
+            if step_count % 10 == 0:
+                logging.info(f"Step {step_count} - Active units: {np.sum(obs['player_0']['units_mask'])}")
+                logging.info(f"Step {step_count} - Current reward: {current_reward:.2f}")
+            
+            # Check termination
+            done = jnp.any(done_flags["player_0"])
         
-        # Convert episode reward to float and store
-        final_reward = float(episode_reward)
-        total_rewards.append(final_reward)
-        
-        # Assign rewards to all steps in episode
-        step_rewards = [final_reward / len(episode_observations)] * len(episode_observations)
+        # Store episode data
+        total_rewards.append(episode_reward)
+        step_rewards = [episode_reward / len(episode_observations)] * len(episode_observations)
         
         # Add episode data to overall buffers
         all_observations.extend(episode_observations)
@@ -178,43 +196,50 @@ def train_basic_env(num_episodes: int = 100) -> None:
         
         # Update policy if we have enough experience
         if len(all_observations) >= buffer_size:
-            # Convert to arrays and normalize rewards
-            # Stack observations into a dictionary of batched observations
-            # Create batched observations for each player
-            def create_batched_obs(player_idx):
-                return {
-                    "units": {
-                        "position": jnp.stack([obs["units"][player_idx]["position"] for obs in all_observations]),
-                        "energy": jnp.stack([obs["units"][player_idx]["energy"] for obs in all_observations])
-                    },
-                    "units_mask": jnp.stack([obs["units_mask"][player_idx] for obs in all_observations]),
-                    "map_features": {
-                        "energy": jnp.stack([obs["map_features"]["energy"] for obs in all_observations]),
-                        "tile_type": jnp.stack([obs["map_features"]["tile_type"] for obs in all_observations])
-                    },
-                    "sensor_mask": jnp.stack([obs["sensor_mask"][player_idx] for obs in all_observations]),
-                    "team_points": jnp.stack([obs["team_points"] for obs in all_observations]),
-                    "team_wins": jnp.stack([obs["team_wins"] for obs in all_observations]),
-                    "steps": jnp.array([obs["steps"] for obs in all_observations]),
-                    "match_steps": jnp.array([obs["match_steps"] for obs in all_observations]),
-                    "relic_nodes": jnp.stack([obs["relic_nodes"] for obs in all_observations]),
-                    "relic_nodes_mask": jnp.stack([obs["relic_nodes_mask"] for obs in all_observations])
-                }
+            # Stack observations into batched format
+            obs_batch = create_batched_obs(all_observations)
+            action_array = jnp.array(all_actions)  # Shape: [batch_size, max_units]
+            reward_array = jnp.array(all_rewards)  # Shape: [batch_size]
             
-            obs_dict = {
-                "player_0": create_batched_obs(0),
-                "player_1": create_batched_obs(1)
-            }
-            action_array = jnp.array(all_actions)
-            reward_array = jnp.array(all_rewards)
+            # Log shapes for debugging
+            logging.info(f"Batch shapes before update:")
+            logging.info(f"Action array shape: {action_array.shape}")
+            logging.info(f"Reward array shape: {reward_array.shape}")
+            for player in ["player_0", "player_1"]:
+                logging.info(f"{player} observation shapes:")
+                for key, value in obs_batch[player].items():
+                    if isinstance(value, dict):
+                        for subkey, subvalue in value.items():
+                            logging.info(f"  {key}.{subkey}: {subvalue.shape}")
+                    else:
+                        logging.info(f"  {key}: {value.shape}")
+            
+            # Normalize rewards
             reward_array = (reward_array - reward_array.mean()) / (reward_array.std() + 1e-8)
+            
+            # Log pre-update state
+            logging.info("Pre-update policy state:")
+            params_dict = flax.traverse_util.flatten_dict(policy_state.params)
+            for key, value in params_dict.items():
+                if any(layer in '.'.join(key) for layer in ['Dense_0', 'Dense_1', 'Dense_2']):
+                    logging.info(f"{'.'.join(key)} mean: {jnp.mean(value)}")
             
             # Update policy
             policy_state, loss = update_step(
                 policy, policy_state,
-                obs_dict, action_array, reward_array,
+                obs_batch, action_array, reward_array,
                 optimizer
             )
+            
+            # Log post-update state
+            logging.info("Post-update policy state:")
+            params_dict = flax.traverse_util.flatten_dict(policy_state.params)
+            for key, value in params_dict.items():
+                if any(layer in '.'.join(key) for layer in ['Dense_0', 'Dense_1', 'Dense_2']):
+                    logging.info(f"{'.'.join(key)} mean: {jnp.mean(value)}")
+            
+            logging.info(f"Update loss: {float(loss)}")
+            logging.info(f"Reward stats - mean: {float(jnp.mean(reward_array))}, std: {float(jnp.std(reward_array))}")
             episode_losses.append(float(loss))
             
             # Clear buffers
@@ -222,36 +247,104 @@ def train_basic_env(num_episodes: int = 100) -> None:
             all_actions = []
             all_rewards = []
         
-        # Log progress every 10 episodes
+        # Log progress
         if (episode + 1) % 10 == 0:
             mean_reward = np.mean(total_rewards[-10:])
             logging.info("-" * 40)
             logging.info(f"Episode {episode + 1}/{num_episodes}")
             logging.info(f"Mean reward (last 10): {mean_reward:.2f}")
-            logging.info(f"Latest episode reward: {final_reward:.2f}")
+            logging.info(f"Latest episode reward: {episode_reward:.2f}")
             if episode_losses:
                 logging.info(f"Latest loss: {episode_losses[-1]:.4f}")
                 logging.info(f"Total policy updates: {len(episode_losses)}")
-            
-            # Log detailed metrics
-            logging.info("Episode Statistics:")
-            logging.info(f"- Total steps: {step_count}")
-            logging.info(f"- Active units: {len(episode_observations)}")
-            logging.info(f"- Buffer size: {len(all_observations)}/{buffer_size}")
+            logging.info(f"Total steps: {step_count}")
+            logging.info(f"Buffer size: {len(all_observations)}/{buffer_size}")
             logging.info("-" * 40)
     
     # Save trained policy parameters
-    # Note: Using "dummy_weights" key to match what main.py expects
-    model_params = {
-        "dummy_weights": jax.device_get(policy_state.params),  # Save policy params as dummy_weights for compatibility
-        "mean_reward": np.mean(total_rewards),
-        "hidden_dims": policy.hidden_dims,  # Save network architecture for inference
-        "max_units": params.max_units,  # Save environment config for inference
-        "num_actions": 5  # Save action space size for inference
+    # Convert policy parameters to flat numpy arrays
+    # Extract kernel and bias from each layer
+    policy_params_dict = flax.traverse_util.flatten_dict(policy_state.params)
+    numpy_params = {}
+    for key, value in policy_params_dict.items():
+        numpy_params['.'.join(str(k) for k in key)] = np.array(value)
+    
+    # Save parameters as individual arrays
+    save_path = os.path.join(os.path.dirname(__file__), "model_params.npz")
+    save_dict = {
+        **numpy_params,
+        'mean_reward': np.array(np.mean(total_rewards)),
+        'hidden_dims': np.array(policy.hidden_dims),
+        'max_units': np.array(params.max_units),
+        'num_actions': np.array(5)
     }
-    np.savez("kits/rl/model_params.npz", **model_params)
-    print(f"Training complete. Mean reward: {np.mean(total_rewards)}")
-    print(f"Saved model parameters to kits/rl/model_params.npz")
+    np.savez(save_path, **save_dict)
+    logging.info(f"Saved model parameters to {save_path}")
+    logging.info(f"Training complete. Mean reward: {np.mean(total_rewards):.2f}")
+    logging.info("Saved model parameters to kits/rl/model_params.npz")
+def convert_obs_to_dict(raw_obs: Union[EnvObs, Dict[str, EnvObs]]) -> Dict[str, Dict[str, Any]]:
+    """Convert raw observation to policy network format.
+    
+    Args:
+        raw_obs: Either a single EnvObs object or a dictionary mapping player to EnvObs
+    """
+    obs_dict = {}
+    
+    def _convert_single_obs(obs: EnvObs) -> Dict[str, Any]:
+        """Convert a single EnvObs to dictionary format."""
+        return {
+            "units": {
+                "position": jnp.array(obs.units.position),
+                "energy": jnp.array(obs.units.energy)
+            },
+            "units_mask": jnp.array(obs.units_mask),
+            "map_features": {
+                "energy": jnp.array(obs.map_features.energy),
+                "tile_type": jnp.array(obs.map_features.tile_type)
+            },
+            "sensor_mask": jnp.array(obs.sensor_mask),
+            "team_points": jnp.array(obs.team_points),
+            "team_wins": jnp.array(obs.team_wins),
+            "steps": obs.steps,
+            "match_steps": obs.match_steps,
+            "relic_nodes": jnp.array(obs.relic_nodes),
+            "relic_nodes_mask": jnp.array(obs.relic_nodes_mask)
+        }
+    
+    if isinstance(raw_obs, dict):
+        # Handle Dict[str, EnvObs] case
+        for player in ["player_0", "player_1"]:
+            obs_dict[player] = _convert_single_obs(raw_obs[player])
+    else:
+        # Handle single EnvObs case
+        obs_dict["player_0"] = _convert_single_obs(raw_obs)
+        obs_dict["player_1"] = _convert_single_obs(raw_obs)
+    
+    return obs_dict
+
+def create_batched_obs(observations: List[Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, Any]]:
+    """Create batched observations from a list of dictionary format observations."""
+    return {
+        player: {
+            "units": {
+                "position": jnp.stack([obs[player]["units"]["position"] for obs in observations]),
+                "energy": jnp.stack([obs[player]["units"]["energy"] for obs in observations])
+            },
+            "units_mask": jnp.stack([obs[player]["units_mask"] for obs in observations]),
+            "map_features": {
+                "energy": jnp.stack([obs[player]["map_features"]["energy"] for obs in observations]),
+                "tile_type": jnp.stack([obs[player]["map_features"]["tile_type"] for obs in observations])
+            },
+            "sensor_mask": jnp.stack([obs[player]["sensor_mask"] for obs in observations]),
+            "team_points": jnp.stack([obs[player]["team_points"] for obs in observations]),
+            "team_wins": jnp.stack([obs[player]["team_wins"] for obs in observations]),
+            "steps": jnp.array([obs[player]["steps"] for obs in observations]),
+            "match_steps": jnp.array([obs[player]["match_steps"] for obs in observations]),
+            "relic_nodes": jnp.stack([obs[player]["relic_nodes"] for obs in observations]),
+            "relic_nodes_mask": jnp.stack([obs[player]["relic_nodes_mask"] for obs in observations])
+        }
+        for player in ["player_0", "player_1"]
+    }
 
 if __name__ == "__main__":
     train_basic_env()
