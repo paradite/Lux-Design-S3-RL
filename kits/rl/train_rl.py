@@ -29,9 +29,9 @@ def train_basic_env(num_episodes: int = 20) -> None:
     params: EnvParams = env.default_params
     
     # Initialize random key for JAX
-    key: chex.PRNGKey = jax.random.PRNGKey(0)
-    key, policy_key = jax.random.split(key)
-    policy, policy_state, optimizer = create_policy(policy_key)
+    rng = jax.random.PRNGKey(0)
+    rng, policy_rng = jax.random.split(rng)
+    policy, policy_state, optimizer = create_policy(policy_rng)
     
     # Initialize metrics and buffers
     total_rewards: List[float] = []
@@ -57,8 +57,8 @@ def train_basic_env(num_episodes: int = 20) -> None:
     # Training loop
     for episode in range(num_episodes):
         # Reset environment
-        key, reset_key = jax.random.split(key)
-        raw_obs, state = env.reset(reset_key, params)
+        rng, reset_rng = jax.random.split(rng)
+        raw_obs, state = env.reset(reset_rng, params)
         
         # Get observation dictionary from environment
         obs_dict = env.get_obs(state, params)
@@ -97,10 +97,10 @@ def train_basic_env(num_episodes: int = 20) -> None:
             step_count += 1
             
             # Generate keys for action sampling
-            key, key_p0, key_p1 = jax.random.split(key, 3)
+            rng, action_rng, opponent_rng = jax.random.split(rng, 3)
             
             # Sample actions for current player using the policy network
-            current_actions = sample_action(policy, policy_state, obs, current_player, key_p0)
+            current_actions = sample_action(policy, policy_state, obs, current_player, action_rng)
             
             # Convert to full action format (movement + sap direction)
             # Remove batch dimension since we're processing one step at a time
@@ -111,7 +111,7 @@ def train_basic_env(num_episodes: int = 20) -> None:
             # Random opponent actions
             opponent_full_actions = jnp.zeros((params.max_units, 3), dtype=jnp.int32)
             opponent_full_actions = opponent_full_actions.at[:, 0].set(
-                jax.random.randint(key_p1, (params.max_units,), 0, 5)
+                jax.random.randint(opponent_rng, (params.max_units,), 0, 5)
             )
             
             # Create action dictionary for both players
@@ -162,8 +162,8 @@ def train_basic_env(num_episodes: int = 20) -> None:
             episode_actions.append(current_actions)
             
             # Step environment
-            key, step_key = jax.random.split(key)
-            step_result = env.step(step_key, state, actions, params)
+            rng, step_rng = jax.random.split(rng)
+            step_result = env.step(step_rng, state, actions, params)
             raw_obs, state, rewards, done_flags = step_result[:4]  # Unpack only what we need
             
             # Get observation dictionary and convert to policy format
