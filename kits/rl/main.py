@@ -75,9 +75,11 @@ class TrainedAgent:
         
         # Create proper observation structure using struct.replace
         empty_unit_state = UnitState()
-        # Create unit state with position and energy for all units
+        # Create unit state with position and energy for current team
         position = jnp.array(obs["units"][self.team_id]["position"], dtype=jnp.int16)  # Shape: (max_units, 2)
         energy = jnp.array(obs["units"][self.team_id]["energy"], dtype=jnp.int16)  # Shape: (max_units,)
+        
+        # Create unit state with proper shapes
         unit_state = struct.replace(
             empty_unit_state,
             position=position,  # Shape: (max_units, 2)
