@@ -151,8 +151,8 @@ def create_dummy_obs(max_units=16):
     }
     return dummy_obs
 
-def create_policy(rng, hidden_dims=(64, 64), max_units=16, learning_rate=1e-3):
-    """Create and initialize the policy network and optimizer."""
+def create_policy(rng, hidden_dims=(128, 128, 64), max_units=16, learning_rate=1e-3):
+    """Create and initialize the policy network and optimizer with deeper architecture."""
     policy = PolicyNetwork(hidden_dims=hidden_dims)
     
     # Initialize with dummy observation dictionary in raw format

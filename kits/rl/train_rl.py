@@ -175,9 +175,12 @@ def train_basic_env(num_episodes: int = 20) -> None:
             current_unit_count = float(np.sum(obs[current_player]["units_mask"]))
             
             # Calculate exploration bonus based on unit positions
-            unit_positions = obs[current_player]["units"]["position"][current_team_idx]
-            valid_positions = unit_positions[obs[current_player]["units_mask"][current_team_idx]]
-            unique_positions = len(set(tuple(pos) for pos in valid_positions))
+            unit_positions = np.array(obs[current_player]["units"]["position"][current_team_idx])
+            valid_mask = np.array(obs[current_player]["units_mask"][current_team_idx])
+            valid_positions = unit_positions[valid_mask]
+            # Convert positions to tuples for set operation
+            position_tuples = [tuple(pos) for pos in valid_positions]
+            unique_positions = len(set(position_tuples))
             exploration_bonus = 0.05 * unique_positions  # Small bonus for exploring unique positions
             
             # Balance between points, units, and exploration
