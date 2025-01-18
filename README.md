@@ -13,19 +13,27 @@ The full game rules/specs can be found [here](docs/specs.md).
 We recommend using a python package manager like conda/mamba to install the dependencies.
 
 ```bash
-mamba create -n "lux-s3" "python==3.11"
-git clone https://github.com/Lux-AI-Challenge/Lux-Design-S3/
-pip install -e Lux-Design-S3/src
+# create a new virtual environment
+uv init
+uv venv
+
+# activate the virtual environment
+source .venv/bin/activate
+
+# install pip
+python -m ensurepip
+python -m pip install --upgrade pip
+
+# install the dependencies
+pip install -e src
 ```
 
 To verify your installation, you can run a match between two random agents:
 
 ```bash
 luxai-s3 --help
-```
 
-```bash
-luxai-s3 path/to/bot/main.py path/to/bot/main.py --output replay.json
+luxai-s3 kits/python/main.py kits/python/main.py --output replays/replay.json
 ```
 
 Then upload the replay.json to the online visualizer here: https://s3vis.lux-ai.org/ (a link on the lux-ai.org website will be up soon) 
