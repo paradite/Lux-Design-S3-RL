@@ -46,8 +46,8 @@ def train_basic_env(num_episodes: int = 100) -> None:
     params: EnvParams = env.default_params
     
     # Type annotation for obs that will be used throughout the function
-    # Note: obs is EnvObs containing the observation for both teams
-    obs: EnvObs
+    # Note: obs is a dictionary containing observations for both teams
+    obs: Dict[str, Any]
     
     logging.info("Starting training with parameters:")
     logging.info(f"Max steps per match: {params.max_steps_in_match}")
@@ -67,13 +67,13 @@ def train_basic_env(num_episodes: int = 100) -> None:
     episode_losses: List[float] = []
     
     # Initialize experience buffers for the episode
-    episode_observations: List[EnvObs] = []
+    episode_observations: List[Dict[str, Any]] = []
     episode_actions: List[chex.Array] = []
     episode_rewards: List[float] = []
     
     # Buffer for collecting experience across episodes
     buffer_size = 1000
-    all_observations: List[EnvObs] = []
+    all_observations: List[Dict[str, Any]] = []
     all_actions: List[chex.Array] = []
     all_rewards: List[float] = []
     
@@ -81,7 +81,7 @@ def train_basic_env(num_episodes: int = 100) -> None:
         # Reset environment
         key, reset_key = jax.random.split(key)
         # Reset environment and get initial observation
-        raw_obs, state = env.reset(reset_key, params)  # raw_obs is EnvObs
+        raw_obs, state = env.reset(reset_key, params)  # raw_obs is a dictionary
         obs = raw_obs  # Use raw observation directly
         
         episode_reward = jnp.array(0.0)
@@ -94,9 +94,32 @@ def train_basic_env(num_episodes: int = 100) -> None:
             key, key_p0, key_p1 = jax.random.split(key, 3)
             
             # Create observation dictionary for both players
+            # Note: raw_obs is already a dictionary with the correct format
             obs_dict = {
-                "player_0": obs,
-                "player_1": obs
+                "player_0": {
+                    "units": obs["units"][0],  # Team 0's units
+                    "units_mask": obs["units_mask"][0],  # Team 0's unit mask
+                    "map_features": obs["map_features"],
+                    "sensor_mask": obs["sensor_mask"][0],
+                    "team_points": obs["team_points"],
+                    "team_wins": obs["team_wins"],
+                    "steps": obs["steps"],
+                    "match_steps": obs["match_steps"],
+                    "relic_nodes": obs["relic_nodes"],
+                    "relic_nodes_mask": obs["relic_nodes_mask"]
+                },
+                "player_1": {
+                    "units": obs["units"][1],  # Team 1's units
+                    "units_mask": obs["units_mask"][1],  # Team 1's unit mask
+                    "map_features": obs["map_features"],
+                    "sensor_mask": obs["sensor_mask"][1],
+                    "team_points": obs["team_points"],
+                    "team_wins": obs["team_wins"],
+                    "steps": obs["steps"],
+                    "match_steps": obs["match_steps"],
+                    "relic_nodes": obs["relic_nodes"],
+                    "relic_nodes_mask": obs["relic_nodes_mask"]
+                }
             }
             
             # Sample actions for player_0 using the policy network
@@ -157,9 +180,30 @@ def train_basic_env(num_episodes: int = 100) -> None:
         if len(all_observations) >= buffer_size:
             # Convert to arrays and normalize rewards
             # Stack observations into a dictionary of batched observations
+            # Create batched observations for each player
+            def create_batched_obs(player_idx):
+                return {
+                    "units": {
+                        "position": jnp.stack([obs["units"][player_idx]["position"] for obs in all_observations]),
+                        "energy": jnp.stack([obs["units"][player_idx]["energy"] for obs in all_observations])
+                    },
+                    "units_mask": jnp.stack([obs["units_mask"][player_idx] for obs in all_observations]),
+                    "map_features": {
+                        "energy": jnp.stack([obs["map_features"]["energy"] for obs in all_observations]),
+                        "tile_type": jnp.stack([obs["map_features"]["tile_type"] for obs in all_observations])
+                    },
+                    "sensor_mask": jnp.stack([obs["sensor_mask"][player_idx] for obs in all_observations]),
+                    "team_points": jnp.stack([obs["team_points"] for obs in all_observations]),
+                    "team_wins": jnp.stack([obs["team_wins"] for obs in all_observations]),
+                    "steps": jnp.array([obs["steps"] for obs in all_observations]),
+                    "match_steps": jnp.array([obs["match_steps"] for obs in all_observations]),
+                    "relic_nodes": jnp.stack([obs["relic_nodes"] for obs in all_observations]),
+                    "relic_nodes_mask": jnp.stack([obs["relic_nodes_mask"] for obs in all_observations])
+                }
+            
             obs_dict = {
-                "player_0": jax.tree_map(lambda *x: jnp.stack(x), *[obs for obs in all_observations]),
-                "player_1": jax.tree_map(lambda *x: jnp.stack(x), *[obs for obs in all_observations])
+                "player_0": create_batched_obs(0),
+                "player_1": create_batched_obs(1)
             }
             action_array = jnp.array(all_actions)
             reward_array = jnp.array(all_rewards)
