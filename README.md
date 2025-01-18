@@ -33,7 +33,9 @@ To verify your installation, you can run a match between two random agents:
 ```bash
 luxai-s3 --help
 
-luxai-s3 kits/python/main.py kits/python/main.py --output replays/replay.json
+luxai-s3 kits/rl/main.py kits/do_nothing/main.py --output replays/replay.json
+
+luxai-s3 kits/do_nothing/main.py kits/rl/main.py --output replays/replay.json
 ```
 
 Then upload the replay.json to the online visualizer here: https://s3vis.lux-ai.org/ (a link on the lux-ai.org website will be up soon) 
