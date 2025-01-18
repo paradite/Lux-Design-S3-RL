@@ -263,4 +263,7 @@ if __name__ == "__main__":
         actions = agent_fn(observation, dict(env_cfg=env_cfg))
         
         # Send actions to engine
-        print(json.dumps(actions))
+        actions_json = {
+            'action': actions['action'].tolist() if isinstance(actions['action'], np.ndarray) else actions['action']
+        }
+        print(json.dumps(actions_json))

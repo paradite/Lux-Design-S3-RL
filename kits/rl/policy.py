@@ -10,11 +10,11 @@ from flax import struct
 import flax.core
 import chex
 
-@struct.dataclass(frozen=True)
+@struct.dataclass
 class PolicyState:
     """State of the policy network."""
-    params: Any = None
-    opt_state: Any = None
+    params: Any
+    opt_state: Any
 
 class PolicyNetwork(nn.Module):
     """Simple policy network for the Lux AI Season 3 environment."""
@@ -89,11 +89,23 @@ class PolicyNetwork(nn.Module):
         # Process each unit's features through the network
         batch_size = x.shape[0]
         max_units = x.shape[1]
-        feature_dim = x.shape[2]
+        
+        # Normalize features to prevent -1 values
+        pos_feature = pos_feature.astype(jnp.float32)
+        energy_feature = energy_feature.astype(jnp.float32)
+        
+        # Normalize position to [0,1] range
+        pos_feature = pos_feature / 24.0  # Assuming 24x24 map
+        # Normalize energy to [0,1] range
+        energy_feature = energy_feature / 100.0  # Assuming max energy is 100
         
         # Reshape for dense layers while preserving batch structure
-        feature_dim = x.shape[-1]  # Now 5 dimensions: pos(2) + energy(1) + mask(1) + team_idx(1)
-        x = x.reshape(-1, feature_dim)  # Shape: (batch_size * max_units, feature_dim)
+        x = jnp.concatenate([
+            pos_feature.reshape(-1, 2),  # Flatten position features
+            energy_feature.reshape(-1, 1),  # Flatten energy
+            mask_feature.reshape(-1, 1),  # Flatten mask
+            team_idx_feature.reshape(-1, 1)  # Flatten team index
+        ], axis=1)  # Final shape: (batch_size * max_units, 5)
         
         # Simple feedforward network
         for hidden_dim in self.hidden_dims:
@@ -284,7 +296,7 @@ def update_step(policy, policy_state, obs_batch, action_batch, reward_batch, opt
         reward_batch: Batched rewards
         optimizer: Optax optimizer
     """
-    loss_fn = lambda p: compute_loss(policy, PolicyState().replace(params=p, opt_state=policy_state.opt_state), obs_batch, action_batch, reward_batch)
+    loss_fn = lambda p: compute_loss(policy, PolicyState(params=p, opt_state=policy_state.opt_state), obs_batch, action_batch, reward_batch)
     loss, grads = jax.value_and_grad(loss_fn)(policy_state.params)
     updates, new_opt_state = optimizer.update(grads, policy_state.opt_state)
     new_params = optax.apply_updates(policy_state.params, updates)

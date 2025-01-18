@@ -173,7 +173,8 @@ def train_basic_env(num_episodes: int = 10) -> None:
             # Update reward based on team points and unit counts for current player
             current_team_points = float(obs[current_player]["team_points"][current_team_idx])
             current_unit_count = float(np.sum(obs[current_player]["units_mask"]))
-            current_reward = current_team_points + 0.1 * current_unit_count
+            # Increase weight for unit count to encourage unit production and survival
+            current_reward = current_team_points + 0.2 * current_unit_count
             episode_reward += current_reward
             
             # Log reward components for debugging
