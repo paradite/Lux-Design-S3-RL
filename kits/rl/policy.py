@@ -20,36 +20,30 @@ class PolicyNetwork(nn.Module):
     num_actions: int = 5  # 0-4 for movement
     
     @nn.compact
-    def __call__(self, obs: Dict[str, EnvObs], player: str):
+    def __call__(self, obs: Dict[str, Dict], player: str):
         """Process observation into action logits.
         
         Args:
-            obs: Dictionary mapping player to their EnvObs
+            obs: Dictionary mapping player to their raw observation dictionary
+                containing units, units_mask, etc.
             player: Current player ("player_0" or "player_1")
         """
         # Get current player's observation
         player_obs = obs[player]
         team_idx = jnp.array(0 if player == "player_0" else 1, dtype=jnp.int32)
         
-        # Extract relevant features from observation
-        # Get position and energy from UnitState dataclass
-        # Note: position has shape (2, max_units, 2), energy has shape (2, max_units)
-        units_pos = player_obs.units.position  # Shape: (2, max_units, 2)
-        units_energy = player_obs.units.energy  # Shape: (2, max_units)
+        # Extract relevant features from raw observation dictionary
+        # Note: position has shape (max_units, 2), energy has shape (max_units,)
+        units_pos = jnp.array(player_obs["units"]["position"], dtype=jnp.int16)
+        units_energy = jnp.array(player_obs["units"]["energy"], dtype=jnp.int16)
         
-        # Get unit mask directly from EnvObs dataclass
-        units_mask = player_obs.units_mask  # Shape: (2, max_units)
+        # Get unit mask directly from observation dictionary
+        units_mask = jnp.array(player_obs["units_mask"], dtype=jnp.bool_)
         
-        # Get current team's features using JAX indexing
-        pos_feature = jnp.take(units_pos, team_idx, axis=0)  # Shape: (max_units, 2)
-        energy_feature = jnp.expand_dims(
-            jnp.take(units_energy, team_idx, axis=0),
-            axis=-1
-        )  # Shape: (max_units, 1)
-        mask_feature = jnp.expand_dims(
-            jnp.take(units_mask, team_idx, axis=0).astype(jnp.float32),
-            axis=-1
-        )  # Shape: (max_units, 1)
+        # Features are already team-specific, just need to reshape
+        pos_feature = units_pos  # Shape: (max_units, 2)
+        energy_feature = jnp.expand_dims(units_energy, axis=-1)  # Shape: (max_units, 1)
+        mask_feature = jnp.expand_dims(units_mask.astype(jnp.float32), axis=-1)  # Shape: (max_units, 1)
         
         x = jnp.concatenate([
             pos_feature,  # Shape: (max_units, 2)
@@ -163,15 +157,17 @@ def sample_action(policy, params, obs: Dict[str, EnvObs], player: str, rng):
     noise = jax.random.gumbel(rng, logits.shape)
     actions = jnp.argmax(logits + noise, axis=-1)
     # Mask actions for invalid units using player's mask
-    return jnp.where(obs[player].units_mask, actions, 0)
+    valid_mask = jnp.array(obs[player]["units_mask"], dtype=jnp.bool_)
+    return jnp.where(valid_mask, actions, 0)
 
-def compute_loss(policy, params, obs_batch: Dict[str, EnvObs], action_batch, reward_batch):
+def compute_loss(policy, params, obs_batch: Dict[str, Dict], action_batch, reward_batch):
     """Compute policy gradient loss.
     
     Args:
         policy: PolicyNetwork instance
         params: Policy parameters
-        obs_batch: Dictionary mapping player to batched EnvObs
+        obs_batch: Dictionary mapping player to batched raw observation dictionary
+                  containing units, units_mask, etc.
         action_batch: Array of actions taken (shape: [batch_size, max_units])
         reward_batch: Array of rewards (shape: [batch_size])
     
@@ -190,9 +186,7 @@ def compute_loss(policy, params, obs_batch: Dict[str, EnvObs], action_batch, rew
     )[..., 0]  # Remove gathered dimension
     
     # Mask out invalid units using player_0's mask
-    valid_mask = obs_batch["player_0"].units_mask  # Get player_0's mask
-    # Convert to float32 for proper masking
-    valid_mask = valid_mask.astype(jnp.float32)
+    valid_mask = jnp.array(obs_batch["player_0"]["units_mask"], dtype=jnp.float32)  # Get player_0's mask
     log_probs = jnp.where(
         valid_mask > 0,
         jnp.log(selected_probs + 1e-8),
