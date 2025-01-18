@@ -8,7 +8,9 @@ from lux.kit import from_json
 
 import jax
 import jax.numpy as jnp
-from policy import PolicyNetwork
+from flax import struct
+from policy import PolicyNetwork, create_dummy_obs
+from luxai_s3.state import EnvObs, UnitState, MapTile
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,37 +30,32 @@ class TrainedAgent:
         self.opp_team_id = 1 if self.team_id == 0 else 0
         self.env_cfg = env_cfg
         
+        # Initialize random key for JAX
+        self.key = jax.random.PRNGKey(0)
+        
         # Load trained parameters and initialize policy
         try:
             data = np.load(os.path.join(os.path.dirname(__file__), "model_params.npz"))
-            self.weights = data["dummy_weights"]  # These are the policy parameters
+            self.policy_params = jax.tree_map(jnp.array, data["policy_params"])
             self.mean_reward = data.get("mean_reward", 0.0)
             self.hidden_dims = tuple(data["hidden_dims"])
-            self.num_actions = int(data.get("num_actions", 5))
             
             # Initialize policy network
-            self.policy = PolicyNetwork(
-                hidden_dims=self.hidden_dims,
-                num_actions=self.num_actions
-            )
+            self.policy = PolicyNetwork(hidden_dims=self.hidden_dims)
             
-            # Convert numpy arrays to jax arrays for policy
-            self.params = jax.tree_map(jnp.array, self.weights)
-            
-            # Log model loading details
             logging.info(f"Successfully loaded model for player {player}")
             logging.info(f"Model architecture: hidden_dims={self.hidden_dims}")
             logging.info(f"Previous mean reward: {self.mean_reward:.2f}")
-            logging.info(f"Action space size: {self.num_actions}")
             
         except Exception as e:
-            print(f"Warning: Could not load model parameters: {e}", file=sys.stderr)
-            self.weights = np.zeros((1,))
+            logging.error(f"Could not load model parameters: {e}")
+            # Initialize with dummy parameters
+            dummy_obs = create_dummy_obs()
+            self.policy = PolicyNetwork(hidden_dims=(64, 64))
+            self.key, init_key = jax.random.split(self.key)
+            self.policy_params = self.policy.init(init_key, dummy_obs)
             self.mean_reward = 0.0
             self.hidden_dims = (64, 64)
-            self.num_actions = 5
-            self.policy = None
-            self.params = None
 
     def act(self, step: int, obs, remainingOverageTime: int = 60):
         """Generate actions using the trained policy network"""
@@ -76,25 +73,48 @@ class TrainedAgent:
                 ], dtype=np.int32)
             return actions
         
-        # Prepare observation for policy
-        policy_obs = {
-            "units": {
-                "position": jnp.array(obs["units"][self.team_id]["position"]),
-                "energy": jnp.array(obs["units"][self.team_id]["energy"])
-            },
-            "units_mask": jnp.array(unit_mask),
-            "map_features": {
-                "energy": jnp.array(obs["map_features"]["energy"]),
-                "tile_type": jnp.array(obs["map_features"]["tile_type"])
-            },
-            "sensor_mask": jnp.array(obs["sensor_mask"])
-        }
+        # Create proper observation structure using struct.replace
+        empty_unit_state = UnitState()
+        # Create unit state with position and energy for all units
+        position = jnp.array(obs["units"][self.team_id]["position"], dtype=jnp.int16)  # Shape: (max_units, 2)
+        energy = jnp.array(obs["units"][self.team_id]["energy"], dtype=jnp.int16)  # Shape: (max_units,)
+        unit_state = struct.replace(
+            empty_unit_state,
+            position=position,  # Shape: (max_units, 2)
+            energy=energy  # Shape: (max_units,)
+        )
         
-        # Get action logits from policy
-        logits = self.policy.apply(self.params, policy_obs)
+        empty_map_tile = MapTile()
+        map_features = struct.replace(
+            empty_map_tile,
+            energy=jnp.array(obs["map_features"]["energy"], dtype=jnp.int16),
+            tile_type=jnp.array(obs["map_features"]["tile_type"], dtype=jnp.int16)
+        )
         
-        # Convert logits to actions (convert to numpy for final output)
-        movement_actions = np.array(jnp.argmax(logits, axis=-1))
+        # Create EnvObs object using struct.replace
+        empty_env_obs = EnvObs()
+        env_obs = struct.replace(
+            empty_env_obs,
+            units=unit_state,
+            units_mask=jnp.array(unit_mask, dtype=jnp.bool_),
+            map_features=map_features,
+            sensor_mask=jnp.array(obs["sensor_mask"], dtype=jnp.bool_),
+            team_points=jnp.array(obs["team_points"], dtype=jnp.int32),
+            team_wins=jnp.array(obs["team_wins"], dtype=jnp.int32),
+            steps=step,
+            match_steps=step,
+            relic_nodes=jnp.array(obs["relic_nodes"], dtype=jnp.int16),
+            relic_nodes_mask=jnp.array(obs["relic_nodes_mask"], dtype=jnp.bool_)
+        )
+        
+        # Wrap in dictionary for policy
+        policy_obs = {self.player: env_obs}
+        
+        # Generate action logits with exploration noise
+        self.key, action_key = jax.random.split(self.key)
+        logits = self.policy.apply(self.policy_params, policy_obs, self.player)
+        noise = jax.random.gumbel(action_key, logits.shape)
+        movement_actions = np.array(jnp.argmax(logits + noise, axis=-1))
         
         # Log action distribution and unit status
         action_counts = np.bincount(movement_actions[unit_mask], minlength=5)

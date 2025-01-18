@@ -31,19 +31,19 @@ class PolicyNetwork(nn.Module):
         player_obs = obs[player_key]
         
         # Extract relevant features from player's observation
+        # Get position and energy from UnitState
         units_pos = player_obs.units.position  # Shape: (max_units, 2)
         units_energy = player_obs.units.energy  # Shape: (max_units,)
+        
+        # Get unit mask
         units_mask = player_obs.units_mask  # Shape: (max_units,)
         
-        # Combine unit features
-        unit_features = jnp.concatenate([
+        # Process each unit independently
+        x = jnp.concatenate([
             units_pos,  # Shape: (max_units, 2)
             jnp.expand_dims(units_energy, axis=1),  # Shape: (max_units, 1)
             jnp.expand_dims(units_mask, axis=1).astype(jnp.float32)  # Shape: (max_units, 1)
         ], axis=-1)  # Final shape: (max_units, 4)
-        
-        # Process each unit independently
-        x = unit_features
         
         # Simple feedforward network
         for hidden_dim in self.hidden_dims:
@@ -100,7 +100,12 @@ def create_dummy_obs(max_units=16):
         relic_nodes: chex.Array = struct.field(default_factory=lambda: dummy_relic_nodes)
         relic_nodes_mask: chex.Array = struct.field(default_factory=lambda: dummy_relic_nodes_mask)
     
-    return DummyEnvObs()
+    # Create dummy observations for both players
+    dummy_obs = DummyEnvObs()
+    return {
+        "player_0": dummy_obs,
+        "player_1": dummy_obs
+    }
 
 def create_policy(rng, hidden_dims=(64, 64), max_units=16, learning_rate=1e-3):
     """Create and initialize the policy network and optimizer."""
