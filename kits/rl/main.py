@@ -75,15 +75,33 @@ class TrainedAgent:
         
         # Create proper observation structure using struct.replace
         empty_unit_state = UnitState()
-        # Create unit state with position and energy for current team
-        position = jnp.array(obs["units"][self.team_id]["position"], dtype=jnp.int16)  # Shape: (max_units, 2)
-        energy = jnp.array(obs["units"][self.team_id]["energy"], dtype=jnp.int16)  # Shape: (max_units,)
+        
+        # Create unit state with position and energy for both teams
+        position = jnp.zeros((2, self.env_cfg["max_units"], 2), dtype=jnp.int16)
+        energy = jnp.zeros((2, self.env_cfg["max_units"]), dtype=jnp.int16)
+        
+        # Set current team's data
+        position = position.at[self.team_id].set(
+            jnp.array(obs["units"][self.team_id]["position"], dtype=jnp.int16)
+        )
+        energy = energy.at[self.team_id].set(
+            jnp.array(obs["units"][self.team_id]["energy"], dtype=jnp.int16)
+        )
+        
+        # Set opponent team's data if available
+        if self.opp_team_id in obs["units"]:
+            position = position.at[self.opp_team_id].set(
+                jnp.array(obs["units"][self.opp_team_id]["position"], dtype=jnp.int16)
+            )
+            energy = energy.at[self.opp_team_id].set(
+                jnp.array(obs["units"][self.opp_team_id]["energy"], dtype=jnp.int16)
+            )
         
         # Create unit state with proper shapes
         unit_state = struct.replace(
             empty_unit_state,
-            position=position,  # Shape: (max_units, 2)
-            energy=energy  # Shape: (max_units,)
+            position=position,  # Shape: (2, max_units, 2)
+            energy=energy  # Shape: (2, max_units)
         )
         
         empty_map_tile = MapTile()
@@ -95,10 +113,19 @@ class TrainedAgent:
         
         # Create EnvObs object using struct.replace
         empty_env_obs = EnvObs()
+        
+        # Create two-team unit mask
+        units_mask = jnp.zeros((2, self.env_cfg["max_units"]), dtype=jnp.bool_)
+        units_mask = units_mask.at[self.team_id].set(unit_mask)
+        if self.opp_team_id in obs["units_mask"]:
+            units_mask = units_mask.at[self.opp_team_id].set(
+                jnp.array(obs["units_mask"][self.opp_team_id], dtype=jnp.bool_)
+            )
+        
         env_obs = struct.replace(
             empty_env_obs,
             units=unit_state,
-            units_mask=jnp.array(unit_mask, dtype=jnp.bool_),
+            units_mask=units_mask,  # Shape: (2, max_units)
             map_features=map_features,
             sensor_mask=jnp.array(obs["sensor_mask"], dtype=jnp.bool_),
             team_points=jnp.array(obs["team_points"], dtype=jnp.int32),
