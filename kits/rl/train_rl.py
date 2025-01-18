@@ -156,8 +156,11 @@ def train_basic_env(num_episodes: int = 100) -> None:
         # Update policy if we have enough experience
         if len(all_observations) >= buffer_size:
             # Convert to arrays and normalize rewards
-            # Stack observations using tree_map for nested structures
-            obs_array = jax.tree_map(lambda *x: jnp.stack(x), *all_observations)
+            # Stack observations into a dictionary of batched observations
+            obs_dict = {
+                "player_0": jax.tree_map(lambda *x: jnp.stack(x), *[obs for obs in all_observations]),
+                "player_1": jax.tree_map(lambda *x: jnp.stack(x), *[obs for obs in all_observations])
+            }
             action_array = jnp.array(all_actions)
             reward_array = jnp.array(all_rewards)
             reward_array = (reward_array - reward_array.mean()) / (reward_array.std() + 1e-8)
@@ -165,7 +168,7 @@ def train_basic_env(num_episodes: int = 100) -> None:
             # Update policy
             policy_state, loss = update_step(
                 policy, policy_state,
-                obs_array, action_array, reward_array,
+                obs_dict, action_array, reward_array,
                 optimizer
             )
             episode_losses.append(float(loss))

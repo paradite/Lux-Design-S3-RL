@@ -33,17 +33,23 @@ class PolicyNetwork(nn.Module):
         
         # Extract relevant features from observation
         # Get position and energy from UnitState dataclass
-        units_pos = player_obs.units.position  # Shape: (max_units, 2)
-        units_energy = player_obs.units.energy  # Shape: (max_units,)
+        # Note: position has shape (2, max_units, 2), energy has shape (2, max_units)
+        units_pos = player_obs.units.position  # Shape: (2, max_units, 2)
+        units_energy = player_obs.units.energy  # Shape: (2, max_units)
         
         # Get unit mask directly from EnvObs dataclass
-        units_mask = player_obs.units_mask  # Shape: (max_units,)
+        units_mask = player_obs.units_mask  # Shape: (2, max_units)
         
-        # Process each unit independently
-        # Ensure consistent shapes before concatenation
-        pos_feature = units_pos  # Already (max_units, 2)
-        energy_feature = jnp.expand_dims(units_energy, axis=-1)  # Add dimension to get (max_units, 1)
-        mask_feature = jnp.expand_dims(units_mask.astype(jnp.float32), axis=-1)  # Add dimension to get (max_units, 1)
+        # Get current team's features using JAX indexing
+        pos_feature = jnp.index_select(units_pos, team_idx, axis=0)  # Shape: (max_units, 2)
+        energy_feature = jnp.expand_dims(
+            jnp.index_select(units_energy, team_idx, axis=0),
+            axis=-1
+        )  # Shape: (max_units, 1)
+        mask_feature = jnp.expand_dims(
+            jnp.index_select(units_mask, team_idx, axis=0).astype(jnp.float32),
+            axis=-1
+        )  # Shape: (max_units, 1)
         
         x = jnp.concatenate([
             pos_feature,  # Shape: (max_units, 2)
@@ -124,7 +130,12 @@ def create_policy(rng, hidden_dims=(64, 64), max_units=16, learning_rate=1e-3):
     policy = PolicyNetwork(hidden_dims=hidden_dims)
     # Initialize with dummy observation
     dummy_obs = create_dummy_obs(max_units)
-    params = policy.init(rng, dummy_obs, team_idx=0)
+    # Create observation dictionary for both players
+    obs_dict = {
+        "player_0": dummy_obs,
+        "player_1": dummy_obs
+    }
+    params = policy.init(rng, obs_dict, "player_0")
     
     # Initialize optimizer
     optimizer = optax.adam(learning_rate)
@@ -155,21 +166,21 @@ def sample_action(policy, params, obs: Dict[str, EnvObs], player: str, rng):
     # Mask actions for invalid units using player's mask
     return jnp.where(obs[player].units_mask, actions, 0)
 
-def compute_loss(policy, params, obs_batch: EnvObs, action_batch, reward_batch):
+def compute_loss(policy, params, obs_batch: Dict[str, EnvObs], action_batch, reward_batch):
     """Compute policy gradient loss.
     
     Args:
         policy: PolicyNetwork instance
         params: Policy parameters
-        obs_batch: Batched EnvObs containing observations
+        obs_batch: Dictionary mapping player to batched EnvObs
         action_batch: Array of actions taken (shape: [batch_size, max_units])
         reward_batch: Array of rewards (shape: [batch_size])
     
     Returns:
         Scalar loss value
     """
-    # Get action logits for team 0
-    logits = policy.apply(params, obs_batch, team_idx=0)  # [batch_size, max_units, num_actions]
+    # Get action logits for player_0
+    logits = policy.apply(params, obs_batch, "player_0")  # [batch_size, max_units, num_actions]
     
     # Compute log probabilities
     action_probs = jax.nn.softmax(logits)
@@ -179,8 +190,8 @@ def compute_loss(policy, params, obs_batch: EnvObs, action_batch, reward_batch):
         axis=-1
     )[..., 0]  # Remove gathered dimension
     
-    # Mask out invalid units using team 0's mask
-    valid_mask = obs_batch.units_mask[0]  # Get team 0's mask
+    # Mask out invalid units using player_0's mask
+    valid_mask = obs_batch["player_0"].units_mask  # Get player_0's mask
     log_probs = jnp.where(
         valid_mask,
         jnp.log(selected_probs + 1e-8),
